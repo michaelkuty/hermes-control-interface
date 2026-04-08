@@ -7,6 +7,7 @@ const crypto = require('crypto');
 const { execFileSync } = require('child_process');
 const pty = require('node-pty');
 const { WebSocketServer } = require('ws');
+const rateLimit = require('express-rate-limit');
 
 const PORT = Number(process.env.PORT || 10272);
 const CONTROL_PASSWORD = process.env.HERMES_CONTROL_PASSWORD;
@@ -78,7 +79,7 @@ const quickActions = [
   { cmd: 'hermes model', desc: 'Inspect the active model' },
   { cmd: 'hermes config', desc: 'Show Hermes config' },
 ];
-const layoutStorePath = path.join(process.env.HERMES_HOME || '/root/.hermes', 'control-interface-layout.json');
+const layoutStorePath = path.join(CONTROL_HOME, 'control-interface-layout.json');
 
 const spriteState = {
   state: 'idle',
@@ -87,6 +88,7 @@ const spriteState = {
   since: Date.now(),
   frame: 0,
 };
+
 const terminalSession = {
   proc: null,
   startedAt: null,
@@ -201,14 +203,12 @@ function requireAuth(req, res, next) {
 
 function setAuthCookie(res) {
   const token = createAuthToken();
-  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${24 * 60 * 60}`);
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${encodeURIComponent(token)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${24 * 60 * 60}; Secure`);
 }
 
 function clearAuthCookie(res) {
-  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0`);
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0; Secure`);
 }
-
-const rateLimit = require('express-rate-limit');
 
 function getClientIp(req) {
   const fw = req.headers['x-forwarded-for'];
@@ -281,11 +281,12 @@ function appendTerminalOutput(chunk) {
 function ensureTerminalSession() {
   if (terminalSession.proc && terminalSession.ready) return terminalSession;
 
+  const REAL_HOME = os.homedir();
   const env = {
     ...process.env,
-    HOME: '/root',
-    USER: 'root',
-    LOGNAME: 'root',
+    HOME: REAL_HOME,
+    USER: REAL_HOME.split('/').pop() || 'root',
+    LOGNAME: REAL_HOME.split('/').pop() || 'root',
     SHELL: '/bin/bash',
     TERM: 'xterm-256color',
     HERMES_HOME: CONTROL_HOME,
@@ -801,42 +802,6 @@ function offlineReply(message) {
   return 'command recv\nno api key needed for local dashboard mode';
 }
 
-function runShell(command) {
-  return new Promise((resolve) => {
-    const env = {
-      ...process.env,
-      HOME: '/root',
-      USER: 'root',
-      LOGNAME: 'root',
-      SHELL: '/bin/bash',
-      TERM: 'xterm-256color',
-      HERMES_HOME: CONTROL_HOME,
-      PATH: process.env.PATH,
-    };
-    const child = exec(command, {
-      cwd: PROJECT_ROOT,
-      env,
-      timeout: 15000,
-      maxBuffer: 1024 * 1024,
-      shell: '/bin/bash',
-    }, (error, stdout, stderr) => {
-      resolve({
-        code: error ? (typeof error.code === 'number' ? error.code : 1) : 0,
-        stdout: stdout || '',
-        stderr: stderr || '',
-      });
-    });
-    child.stdin?.end();
-  });
-}
-
-function buildTerminalCommand(input) {
-  const raw = String(input || '').trim();
-  if (!raw) return '';
-  if (raw === 'hermes') return 'timeout 8s hermes --help 2>&1 | head -n 16';
-  return raw;
-}
-
 app.get('/api/session', (req, res) => {
   res.json({ authenticated: isAuthed(req), passwordRequired: true, identity: 'root@hermes' });
 });
@@ -844,7 +809,7 @@ app.get('/api/session', (req, res) => {
 app.post('/api/login', loginRateLimiter, (req, res) => {
   const ip = getClientIp(req);
   const password = String(req.body?.password || '');
-  if (password !== CONTROL_PASSWORD) {
+  if (!safeTimingEqual(password, CONTROL_PASSWORD)) {
     log('auth.failed', `bad password from ip ${ip}`);
     return res.status(401).json({ ok: false, error: 'bad password' });
   }
