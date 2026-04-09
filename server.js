@@ -868,6 +868,7 @@ function buildDashboardState(authed = false) {
     now: new Date().toISOString(),
     passwordRequired: true,
     authed,
+    agent: buildSpriteState(),
     system: getSystem(),
     sessionCount: getSessions().length,
     sessions: getSessions(),
@@ -1123,9 +1124,32 @@ app.get('/api/avatar', requireAuth, (req, res) => {
   res.json({ ok: true, url: '/api/avatar/image', custom: !!readAvatarOverride() });
 });
 
+// Debug: force agent sprite state for testing
+app.post('/api/agent/state', requireAuth, (req, res) => {
+  const target = String(req.body?.state || '').toLowerCase();
+  const valid = ['idle', 'thinking', 'coding', 'executing', 'error'];
+  if (!valid.includes(target)) return res.status(400).json({ error: `valid states: ${valid.join(', ')}` });
+  const states = ['idle', 'thinking', 'coding', 'executing'];
+  const idx = states.indexOf(target);
+  if (idx >= 0) {
+    spriteState.since = Date.now() - idx * 5000 - 2500; // middle of the slot
+    spriteState.state = target;
+  }
+  log('agent.state.set', target);
+  broadcast();
+  return res.json({ ok: true, state: target });
+});
+
 app.post('/api/avatar', requireAuth, (req, res) => {
   const dataUrl = String(req.body?.dataUrl || '').trim();
-  if (!/^data:image\/(png|jpeg|jpg|webp);base64,/i.test(dataUrl)) {
+  if (!dataUrl) return res.status(400).json({ error: 'no data' });
+  // Accept any image/* data URL with base64 encoding
+  if (!dataUrl.startsWith('data:image/') || !dataUrl.includes(';base64,')) {
+    return res.status(400).json({ error: 'invalid image data' });
+  }
+  // Extract base64 part and validate it's not empty
+  const b64Part = dataUrl.split(';base64,')[1];
+  if (!b64Part || b64Part.length < 10) {
     return res.status(400).json({ error: 'invalid image data' });
   }
   writeAvatarOverride(dataUrl);

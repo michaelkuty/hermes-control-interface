@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Hermes Control Interface</title>
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -33,16 +34,18 @@
     <div class="topbar-center">
       <span class="pill" id="status-pill">LOCKED</span>
       <span class="pill" id="model-pill">model…</span>
-      <span class="pill" id="state-pill">state…</span>
     </div>
     <div class="topbar-right">
       <span id="clock">--:--:--</span>
       <button class="ghost-btn" id="refresh-btn">refresh</button>
+      <button class="ghost-btn active" id="auto-refresh-btn">auto</button>
       <button class="ghost-btn" id="layout-edit-btn">edit layout</button>
       <button class="ghost-btn" id="layout-save-btn" disabled>save layout</button>
       <button class="ghost-btn" id="logout-btn">logout</button>
     </div>
   </header>
+
+  <div id="toast-container"></div>
 
   <div id="shell" class="locked">
     <aside id="sidebar">
@@ -52,7 +55,6 @@
       <div class="sidebar-agent-shadow"></div>
     </div>
     <div class="sidebar-agent-info">
-      <div id="sidebar-agent-state" class="sidebar-agent-state">idle</div>
       <div id="sidebar-agent-details" class="sidebar-agent-details">standby</div>
     </div>
     <div class="sidebar-agent-controls">
@@ -68,10 +70,6 @@
   <section class="side-section">
     <div class="side-title">Quick actions</div>
     <div id="quick-actions" class="quick-actions"></div>
-  </section>
-  <section class="side-section footer-note">
-    <div class="side-title">Signal</div>
-    <div class="small-meta">live bus: <span id="bus-state">locked</span><br>ws path: /ws<br>fallback: polling every 5s</div>
   </section>
     </aside>
 

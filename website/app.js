@@ -27,10 +27,26 @@ const state = {
   spriteTick: 0,
   widgetLayoutReady: false,
   layoutEditMode: false,
+  autoRefreshTimer: null,
+  autoRefreshEnabled: true,
+  lastTerminalActivity: 0,
 };
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+
+function showToast(message, type = 'info') {
+  const container = document.getElementById('toast-container');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add('fade-out');
+    setTimeout(() => toast.remove(), 300);
+  }, 3000);
+}
 
 const els = {
   shell: $('#shell'),
@@ -41,9 +57,7 @@ const els = {
   loginError: $('#login-error'),
   statusPill: $('#status-pill'),
   modelPill: $('#model-pill'),
-  statePill: $('#state-pill'),
   clock: $('#clock'),
-  busState: $('#bus-state'),
   refreshBtn: $('#refresh-btn'),
   layoutEditBtn: $('#layout-edit-btn'),
   layoutSaveBtn: $('#layout-save-btn'),
@@ -443,38 +457,37 @@ function renderList(container, items, formatter) {
 
 function renderSidebarAgent(snapshot) {
   const a = snapshot.agent || {};
-  const normalized = normalizeAgentState(a.state, a.details);
   const sessions = Array.isArray(snapshot.sessions) ? snapshot.sessions : [];
   const sessionCount = snapshot.sessionCount ?? sessions.length ?? 0;
   const label = a.label || 'David';
-  const stateText = a.state || normalized;
   const detailsText = `${label} • ${sessionCount} sessions`;
-  if (els.sidebarAgentState) els.sidebarAgentState.textContent = stateText;
   if (els.sidebarAgentDetails) els.sidebarAgentDetails.textContent = detailsText;
+
+  const elapsed = Date.now() - state.lastTerminalActivity;
+  let agentState = elapsed < 3000 ? 'thinking' : 'idle';
+
   const avatarUrl = snapshot.avatar?.url || '';
   const hasCustomAvatar = snapshot.avatar?.custom;
-  // Reload avatar if URL changed OR custom flag changed (forces cache-busted reload after upload)
   const avatarKey = `${avatarUrl}|${hasCustomAvatar}`;
+
+  // Load avatar image if changed
   if (avatarUrl && avatarKey !== state._lastSidebarAvatarKey) {
     state._lastSidebarAvatarKey = avatarKey;
-    // Preload the image so we can draw it without flicker
     const cacheBustedUrl = hasCustomAvatar ? `${avatarUrl}?t=${Date.now()}` : avatarUrl;
     const img = new Image();
     img.onload = () => {
       state._sidebarAvatarImg = img;
       state._sidebarAvatarReady = true;
-      // Redraw sprite with new avatar overlay
-      const a = state.snapshot?.agent || {};
-      const normalized = normalizeAgentState(a.state, a.details);
-      drawSidebarSprite(normalized, a.frame || 0);
+      drawSidebarSprite(agentState, 0);
     };
     img.onerror = () => {
       state._sidebarAvatarImg = null;
       state._sidebarAvatarReady = false;
+      drawSidebarSprite(agentState, 0);
     };
     img.src = cacheBustedUrl;
   }
-  drawSidebarSprite(normalized, a.frame || 0);
+  drawSidebarSprite(agentState, 0);
 }
 
 const SIDEBAR_COLORS = {
@@ -509,43 +522,11 @@ function drawSidebarSprite(stateName, frameIdx) {
     }
   }
 
-  // Overlay cached custom avatar image on top of sprite
+  // Overlay custom avatar
   if (state._sidebarAvatarReady && state._sidebarAvatarImg) {
     const img = state._sidebarAvatarImg;
     ctx.imageSmoothingEnabled = true;
-
-    // Draw avatar clean first
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    // State-based animated overlay
-    if (stateName === 'thinking') {
-      // Animated yellow glow border + scanning line
-      const pulse = 0.3 + 0.3 * Math.abs(Math.sin(frameIdx * 0.3));
-      ctx.strokeStyle = `rgba(244, 199, 92, ${pulse})`;
-      ctx.lineWidth = 3;
-      ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
-      // Scanning line moves down
-      const scanY = Math.floor((frameIdx * 3) % canvas.height);
-      ctx.fillStyle = `rgba(244, 199, 92, 0.15)`;
-      ctx.fillRect(0, scanY, canvas.width, 3);
-    } else if (stateName === 'error') {
-      // Red pulse
-      const pulse = 0.4 + 0.4 * Math.abs(Math.sin(frameIdx * 0.4));
-      ctx.fillStyle = `rgba(255, 60, 60, ${pulse * 0.2})`;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.strokeStyle = `rgba(255, 80, 80, ${pulse})`;
-      ctx.lineWidth = 3;
-      ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
-    } else if (stateName === 'executing') {
-      // Green glow border pulse
-      const pulse = 0.3 + 0.3 * Math.abs(Math.sin(frameIdx * 0.3));
-      ctx.strokeStyle = `rgba(103, 240, 162, ${pulse})`;
-      ctx.lineWidth = 2;
-      ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
-      ctx.fillStyle = `rgba(103, 240, 162, ${pulse * 0.1})`;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-    }
-    // idle: clean, no overlay
   }
 }
 
@@ -1054,9 +1035,11 @@ async function saveCurrentFile() {
     state.dirty = false;
     els.fileStatus.textContent = 'saved';
     els.editorMeta.textContent = `${(els.editor.value || '').split('\n').length} lines`;
+    showToast('File saved', 'success');
   } catch (error) {
     els.fileStatus.textContent = 'error';
     els.editorMeta.textContent = error.message;
+    showToast(`Save failed: ${error.message}`, 'error');
   }
 }
 
@@ -1121,14 +1104,6 @@ function renderSnapshot(snapshot) {
     els.statusPill.className = `pill ${snapshot.authed ? 'good' : 'warn'}`;
   }
   if (els.modelPill) els.modelPill.textContent = snapshot.configSummary?.defaultModel || snapshot.models?.[0]?.value || 'model';
-  if (els.statePill) {
-    els.statePill.textContent = snapshot.agent?.state || 'idle';
-    els.statePill.className = 'pill warn';
-  }
-  if (els.busState) {
-    els.busState.textContent = snapshot.authed ? 'ws' : 'locked';
-    els.busState.style.color = snapshot.authed ? 'var(--green)' : 'var(--amber)';
-  }
   if (els.terminalLabel) els.terminalLabel.textContent = snapshot.loginIdentity || 'root@hermes';
   if (els.terminalPrompt) els.terminalPrompt.textContent = snapshot.terminal?.prompt || `${snapshot.loginIdentity || 'root@hermes'}:${snapshot.terminal?.cwd || snapshot.workingDir || '/'}#`;
 
@@ -1183,10 +1158,12 @@ function connectWs() {
       if (data.type === 'terminal-transcript') {
         renderTerminalBuffer(data);
         state.lastTerminalBufferLength = String(data.buffer || '').length;
+        state.lastTerminalActivity = Date.now();
       }
       if (data.type === 'terminal-output') {
         appendTerminalChunk(data.chunk || '');
         state.lastTerminalBufferLength = String(data.buffer || '').length || state.lastTerminalBufferLength;
+        state.lastTerminalActivity = Date.now();
       }
     } catch {}
   });
@@ -1466,14 +1443,15 @@ function bindUi() {
 
 
   els.refreshBtn.addEventListener('click', fetchSnapshot);
+  document.getElementById('auto-refresh-btn')?.addEventListener('click', toggleAutoRefresh);
   els.layoutEditBtn?.addEventListener('click', () => setLayoutEditMode(!state.layoutEditMode));
   els.layoutSaveBtn?.addEventListener('click', async () => {
     try {
       await saveLayoutState();
-      addLine('layout saved', 'green');
+      showToast('Layout saved', 'success');
       setLayoutEditMode(false);
     } catch (error) {
-      addLine(`layout save failed: ${error.message}`, 'red');
+      showToast(`Layout save failed: ${error.message}`, 'error');
     }
   });
   els.logoutBtn.addEventListener('click', logout);
@@ -1514,14 +1492,11 @@ function bindUi() {
   els.saveBtn.addEventListener('click', saveCurrentFile);
   els.avatarUploadBtn?.addEventListener('click', () => els.avatarFileInput?.click());
   els.avatarResetBtn?.addEventListener('click', async () => {
-    // Reset cached avatar so the default loads on next snapshot
     state._lastSidebarAvatarKey = null;
     state._sidebarAvatarImg = null;
     state._sidebarAvatarReady = false;
-    state.avatarSource = '';
-    state.avatarImage = null;
-    state._avatarLoadingSrc = null;
     await postJson('/api/avatar', {}, 'DELETE');
+    showToast('Avatar reset', 'info');
     // Don't call fetchSnapshot() — server broadcasts on avatar change
   });
   els.avatarFileInput?.addEventListener('change', async () => {
@@ -1529,10 +1504,10 @@ function bindUi() {
     if (!file) return;
     try {
       await uploadAvatarFile(file);
-      addLine('avatar updated', 'green');
+      showToast('Avatar updated', 'success');
       els.avatarFileInput.value = '';
     } catch (error) {
-      addLine(`avatar upload failed: ${error.message}`, 'red');
+      showToast(`Avatar upload failed: ${error.message}`, 'error');
     }
   });
   els.editor.addEventListener('input', () => {
@@ -1570,14 +1545,46 @@ function startClock() {
   state.clockTimer = setInterval(tick, 1000);
 }
 
-function startSpriteLoop() {
-  setInterval(() => {
-    if (!state.snapshot) return;
-    const a = state.snapshot.agent || {};
-    const normalized = normalizeAgentState(a.state, a.details);
-    drawSidebarSprite(normalized, state.spriteTick);
-    state.spriteTick++;
-  }, 520);
+function startAutoRefresh() {
+  stopAutoRefresh();
+  if (!state.autoRefreshEnabled) return;
+  state.autoRefreshTimer = setInterval(() => {
+    fetchSnapshot();
+  }, 1000);
+  // Avatar animation loop
+  if (!state.spriteLoopTimer) {
+    state.spriteLoopTimer = setInterval(() => {
+      if (!state.snapshot) return;
+      const elapsed = Date.now() - state.lastTerminalActivity;
+      const agentState = elapsed < 3000 ? 'thinking' : 'idle';
+      drawSidebarSprite(agentState, state.spriteTick++);
+    }, 500);
+  }
+}
+
+function stopAutoRefresh() {
+  if (state.autoRefreshTimer) {
+    clearInterval(state.autoRefreshTimer);
+    state.autoRefreshTimer = null;
+  }
+  if (state.spriteLoopTimer) {
+    clearInterval(state.spriteLoopTimer);
+    state.spriteLoopTimer = null;
+  }
+}
+
+function toggleAutoRefresh() {
+  state.autoRefreshEnabled = !state.autoRefreshEnabled;
+  const btn = document.getElementById('auto-refresh-btn');
+  if (state.autoRefreshEnabled) {
+    btn.classList.add('active');
+    btn.textContent = 'auto';
+    startAutoRefresh();
+  } else {
+    btn.classList.remove('active');
+    btn.textContent = 'off';
+    stopAutoRefresh();
+  }
 }
 
 async function boot() {
@@ -1587,7 +1594,6 @@ async function boot() {
   bindUi();
   initDragResize();
   startClock();
-  startSpriteLoop();
 
   const session = await fetchSession();
   if (session.authenticated) {
@@ -1595,6 +1601,7 @@ async function boot() {
     connectWs();
     await loadLayoutState();
     await fetchSnapshot();
+    startAutoRefresh();
   } else {
     setLocked(true);
   }
