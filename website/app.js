@@ -973,20 +973,24 @@ function setLocked(locked) {
 }
 
 function renderSnapshot(snapshot) {
-  if (!els.topbar) return; // Defensive: DOM not ready
+  if (!els.topbar?.textContent) return; // Defensive: DOM not ready
   state.snapshot = snapshot;
   document.title = `Hermes Control Interface • ${snapshot.agent?.state || 'idle'}`;
-  els.statusPill.textContent = snapshot.authed ? 'LIVE' : 'LOCKED';
-  els.statusPill.className = `pill ${snapshot.authed ? 'good' : 'warn'}`;
-  els.modelPill.textContent = snapshot.configSummary?.defaultModel || snapshot.models?.[0]?.value || 'model';
-  els.statePill.textContent = snapshot.agent?.state || 'idle';
-  els.statePill.className = 'pill warn';
+  if (els.statusPill) {
+    els.statusPill.textContent = snapshot.authed ? 'LIVE' : 'LOCKED';
+    els.statusPill.className = `pill ${snapshot.authed ? 'good' : 'warn'}`;
+  }
+  if (els.modelPill) els.modelPill.textContent = snapshot.configSummary?.defaultModel || snapshot.models?.[0]?.value || 'model';
+  if (els.statePill) {
+    els.statePill.textContent = snapshot.agent?.state || 'idle';
+    els.statePill.className = 'pill warn';
+  }
   if (els.busState) {
     els.busState.textContent = snapshot.authed ? 'ws' : 'locked';
     els.busState.style.color = snapshot.authed ? 'var(--green)' : 'var(--amber)';
   }
-  els.terminalLabel.textContent = snapshot.loginIdentity || 'root@hermes';
-  els.terminalPrompt.textContent = snapshot.terminal?.prompt || `${snapshot.loginIdentity || 'root@hermes'}:${snapshot.terminal?.cwd || snapshot.workingDir || '/'}#`;
+  if (els.terminalLabel) els.terminalLabel.textContent = snapshot.loginIdentity || 'root@hermes';
+  if (els.terminalPrompt) els.terminalPrompt.textContent = snapshot.terminal?.prompt || `${snapshot.loginIdentity || 'root@hermes'}:${snapshot.terminal?.cwd || snapshot.workingDir || '/'}#`;
 
   renderSidebarAgent(snapshot);
   renderQuickActions(snapshot);
