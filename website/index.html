@@ -46,20 +46,21 @@
 
   <div id="shell" class="locked">
     <aside id="sidebar">
-      <section class="side-section">
-        <div id="sidebar-agent-body" class="sidebar-agent-body">
-          <canvas id="sidebar-agent-sprite" class="sidebar-agent-sprite" width="64" height="72"></canvas>
-          <div class="sidebar-agent-info">
-            <div id="sidebar-agent-state" class="sidebar-agent-state">idle</div>
-            <div id="sidebar-agent-details" class="sidebar-agent-details">standby</div>
-          </div>
-        </div>
-        <div class="sidebar-agent-controls">
-          <input type="file" id="avatar-file-input" accept="image/*" style="display:none">
-          <button id="avatar-upload-btn" class="ghost-btn" type="button">upload</button>
-          <button id="avatar-reset-btn" class="ghost-btn" type="button">reset</button>
-        </div>
-      </section>
+  <section class="side-section sidebar-agent-section">
+    <div id="sidebar-agent-stage" class="sidebar-agent-stage">
+      <canvas id="sidebar-agent-sprite" class="sidebar-agent-sprite" width="108" height="108"></canvas>
+      <div class="sidebar-agent-shadow"></div>
+    </div>
+    <div class="sidebar-agent-info">
+      <div id="sidebar-agent-state" class="sidebar-agent-state">idle</div>
+      <div id="sidebar-agent-details" class="sidebar-agent-details">standby</div>
+    </div>
+    <div class="sidebar-agent-controls">
+      <input type="file" id="avatar-file-input" accept="image/*" style="display:none">
+      <button id="avatar-upload-btn" class="ghost-btn" type="button">upload</button>
+      <button id="avatar-reset-btn" class="ghost-btn" type="button">reset</button>
+    </div>
+  </section>
       <section class="side-section">
         <div class="side-title">Quick actions</div>
         <div id="quick-actions" class="quick-actions"></div>
@@ -160,30 +161,6 @@
           <div class="resize-handle"></div>
         </article>
 
-        <article class="panel agent-panel" data-panel-id="agent" data-x="0" data-y="67" data-w="28" data-h="30">
-          <div class="panel-head drag-handle">
-            <span>DAVID BAYENDOR</span>
-            <div class="panel-head-right">
-              <span class="mini-dot green"></span>
-              <span class="mini-label" id="agent-state-label">idle</span>
-              <button id="avatar-upload-btn" class="ghost-btn panel-action" type="button">upload image</button>
-              <button id="avatar-reset-btn" class="ghost-btn panel-action" type="button">reset</button>
-              <input id="avatar-file-input" type="file" accept="image/*" hidden />
-            </div>
-          </div>
-          <div class="panel-body agent-body">
-            <div class="avatar-stage">
-              <div id="agent-sprite" class="sprite idle"></div>
-              <div class="avatar-shadow"></div>
-            </div>
-            <div class="agent-meta">
-              <div class="agent-name">David Bayendor</div>
-              <div id="agent-details" class="agent-details">standby</div>
-            </div>
-          </div>
-          <div class="resize-handle"></div>
-        </article>
-
         <article class="panel knowledge-panel" data-panel-id="knowledge" data-x="29" data-y="67" data-w="71" data-h="30">
           <div class="panel-head drag-handle">
             <span>MARKDOWN / KNOWLEDGE</span>
@@ -211,6 +188,6 @@
 
   <script src="/vendor/xterm/lib/xterm.js"></script>
   <script src="/vendor/xterm-addon-fit/lib/xterm-addon-fit.js"></script>
-  <script type="module" src="/app.js?v=3"></script>
+  <script type="module" src="/app.js?v=4"></script>
 </body>
 </html>

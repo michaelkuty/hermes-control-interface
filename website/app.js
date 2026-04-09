@@ -470,10 +470,10 @@ function drawSidebarSprite(stateName, frameIdx) {
   ctx.imageSmoothingEnabled = false;
   const frames = spriteFrames[stateName] || spriteFrames.idle;
   const frame = frames[frameIdx % frames.length];
-  const pw = 18, ph = 18, scale = 3;
+  const pw = 18, ph = 18, scale = 6;
   canvas.width = pw * scale;
   canvas.height = ph * scale;
-  ctx.fillStyle = '#0e121b';
+  ctx.fillStyle = 'transparent';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   for (let row = 0; row < frame.length; row++) {
     const line = frame[row] || '';
@@ -549,12 +549,13 @@ function renderQuickActions(snapshot) {
 }
 
 function renderSystem(snapshot) {
-  const s = snapshot.system;
+  const s = snapshot.system || {};
+  const a = snapshot.agent || {};
   const memPct = s.memory?.percent ?? 0;
   const diskPct = s.disk?.percent ?? 0;
   els.systemPanel.innerHTML = `
     <div class="stats-grid">
-      <div class="stat-card"><div class="stat-label">CPU load</div><div class="stat-value">${(s.load?.[0] || 0).toFixed(2)}</div><div class="stat-note">${s.cpuCores} cores • ${snapshot.agent.state}</div></div>
+      <div class="stat-card"><div class="stat-label">CPU load</div><div class="stat-value">${(s.load?.[0] || 0).toFixed(2)}</div><div class="stat-note">${s.cpuCores || 0} cores • ${a.state || 'idle'}</div></div>
       <div class="stat-card"><div class="stat-label">Memory</div><div class="stat-value">${memPct}%</div><div class="stat-note">${fmtBytes(s.memory?.used || 0)} / ${fmtBytes(s.memory?.total || 0)}</div><div class="progress"><span style="width:${memPct}%"></span></div></div>
       <div class="stat-card"><div class="stat-label">Disk</div><div class="stat-value">${diskPct}%</div><div class="stat-note">${fmtBytes(s.disk?.used || 0)} used</div><div class="progress"><span style="width:${diskPct}%"></span></div></div>
       <div class="stat-card"><div class="stat-label">Uptime</div><div class="stat-value">${formatUptime(s.uptime || 0)}</div><div class="stat-note">${escapeHtml(s.host)}</div></div>
@@ -818,17 +819,13 @@ function normalizeAgentState(rawState, details = '') {
 }
 
 function renderKnowledge(snapshot) {
+  if (!els.markdownView) return;
   els.markdownView.innerHTML = markdownToHtml(snapshot.knowledge || '');
-  els.eventsCount.textContent = `${snapshot.logs?.length || 0} events`;
+  if (els.eventsCount) els.eventsCount.textContent = `${snapshot.logs?.length || 0} events`;
 }
 
 function renderAgent(snapshot) {
-  const a = snapshot.agent || {};
-  const normalized = normalizeAgentState(a.state, a.details);
-  const sessionCount = snapshot.sessionCount ?? (a.details || normalized);
-  els.agentStateLabel.textContent = a.state || normalized;
-  els.agentDetails.textContent = `${a.label || 'David'} • ${sessionCount} sessions`;
-  paintSprite(normalized, a.frame || 0);
+  // Sidebar agent panel only — nothing to render here since agent panel was moved to sidebar
 }
 
 function renderTreeRoots(snapshot) {
@@ -994,22 +991,30 @@ function renderSnapshot(snapshot) {
 
   renderSidebarAgent(snapshot);
   renderQuickActions(snapshot);
-  renderSystem(snapshot);
-  renderCron(snapshot);
-  renderTokens(snapshot);
-  renderBackground(snapshot);
-  renderAgent(snapshot);
-  renderKnowledge(snapshot);
-  renderTreeRoots(snapshot);
-  if (!state.terminal) renderTerminalBuffer(snapshot.terminal);
+  if (els.systemPanel) renderSystem(snapshot);
+  if (els.cronPanel) renderCron(snapshot);
+  if (els.tokensPanel) renderTokens(snapshot);
+  if (els.backgroundPanel) renderBackground(snapshot);
+  if (els.agentPanel) renderAgent(snapshot);
+  if (els.knowledgePanel) renderKnowledge(snapshot);
+  if (els.explorerPanel) renderTreeRoots(snapshot);
+  if (!state.terminal && els.terminalOutput) renderTerminalBuffer(snapshot.terminal);
 }
 
 async function fetchSnapshot() {
-  const res = await fetch('/api/dashboard-state');
-  const data = await res.json();
-  if (!res.ok) throw new Error(data.error || 'snapshot failed');
-  renderSnapshot(data);
-  return data;
+  try {
+    const res = await fetch('/api/dashboard-state');
+    const data = await res.json();
+    if (!res.ok) {
+      // Not authenticated yet — this is normal before login
+      return null;
+    }
+    renderSnapshot(data);
+    return data;
+  } catch (err) {
+    // Network error or malformed response — wait for WS snapshot instead
+    return null;
+  }
 }
 
 function connectWs() {
@@ -1352,6 +1357,10 @@ function bindUi() {
     if (!file) return;
     try {
       await uploadAvatarFile(file);
+      const snap = await fetchSnapshot();
+      if (snap?.agent) {
+        addLine('avatar updated', 'green');
+      }
       els.avatarFileInput.value = '';
     } catch (error) {
       addLine(`avatar upload failed: ${error.message}`, 'red');
@@ -1395,7 +1404,9 @@ function startClock() {
 function startSpriteLoop() {
   setInterval(() => {
     if (!state.snapshot) return;
-    paintSprite(normalizeAgentState(state.snapshot.agent?.state, state.snapshot.agent?.details), state.spriteTick++ % 2);
+    const a = state.snapshot.agent || {};
+    const normalized = normalizeAgentState(a.state, a.details);
+    drawSidebarSprite(normalized, state.spriteTick++ % 2);
   }, 520);
 }
 
