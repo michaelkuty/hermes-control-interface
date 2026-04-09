@@ -509,43 +509,43 @@ function drawSidebarSprite(stateName, frameIdx) {
     }
   }
 
-  // Overlay cached custom avatar image on top of sprite (no flicker — image is preloaded)
+  // Overlay cached custom avatar image on top of sprite
   if (state._sidebarAvatarReady && state._sidebarAvatarImg) {
     const img = state._sidebarAvatarImg;
-    ctx.imageSmoothingEnabled = false;
+    ctx.imageSmoothingEnabled = true;
 
+    // Draw avatar clean first
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+    // State-based animated overlay
     if (stateName === 'thinking') {
-      // Pixelated effect: draw small then scale up
-      const px = 12; // pixel size
-      const sw = Math.ceil(canvas.width / px);
-      const sh = Math.ceil(canvas.height / px);
-      ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(img, 0, 0, sw, sh);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(canvas, 0, 0, sw, sh, 0, 0, canvas.width, canvas.height);
-      // Warm tint
-      ctx.fillStyle = 'rgba(244, 199, 92, 0.12)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      // Animated yellow glow border + scanning line
+      const pulse = 0.3 + 0.3 * Math.abs(Math.sin(frameIdx * 0.3));
+      ctx.strokeStyle = `rgba(244, 199, 92, ${pulse})`;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+      // Scanning line moves down
+      const scanY = Math.floor((frameIdx * 3) % canvas.height);
+      ctx.fillStyle = `rgba(244, 199, 92, 0.15)`;
+      ctx.fillRect(0, scanY, canvas.width, 3);
     } else if (stateName === 'error') {
-      // Red tint + slight blur via pixelation
-      const px = 8;
-      const sw = Math.ceil(canvas.width / px);
-      const sh = Math.ceil(canvas.height / px);
-      ctx.imageSmoothingEnabled = true;
-      ctx.drawImage(img, 0, 0, sw, sh);
-      ctx.imageSmoothingEnabled = false;
-      ctx.drawImage(canvas, 0, 0, sw, sh, 0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = 'rgba(255, 80, 80, 0.18)';
+      // Red pulse
+      const pulse = 0.4 + 0.4 * Math.abs(Math.sin(frameIdx * 0.4));
+      ctx.fillStyle = `rgba(255, 60, 60, ${pulse * 0.2})`;
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-    } else {
-      // idle / executing: clean draw
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      if (stateName === 'executing') {
-        // Subtle glow pulse
-        ctx.fillStyle = `rgba(103, 240, 162, ${0.05 + (frameIdx * 0.03)})`;
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-      }
+      ctx.strokeStyle = `rgba(255, 80, 80, ${pulse})`;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+    } else if (stateName === 'executing') {
+      // Green glow border pulse
+      const pulse = 0.3 + 0.3 * Math.abs(Math.sin(frameIdx * 0.3));
+      ctx.strokeStyle = `rgba(103, 240, 162, ${pulse})`;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1, 1, canvas.width - 2, canvas.height - 2);
+      ctx.fillStyle = `rgba(103, 240, 162, ${pulse * 0.1})`;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
     }
+    // idle: clean, no overlay
   }
 }
 
@@ -1575,7 +1575,8 @@ function startSpriteLoop() {
     if (!state.snapshot) return;
     const a = state.snapshot.agent || {};
     const normalized = normalizeAgentState(a.state, a.details);
-    drawSidebarSprite(normalized, state.spriteTick++ % 2);
+    drawSidebarSprite(normalized, state.spriteTick);
+    state.spriteTick++;
   }, 520);
 }
 
