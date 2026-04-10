@@ -1,5 +1,4 @@
 # Hermes Control Interface
-![Hermes Control Interface Demo](https://github.com/user-attachments/assets/995577ff-2017-4b3d-bb7f-b80310679157)
 
 
 A self-hosted web dashboard for the Hermes AI agent stack. Provides a browser-based terminal, file explorer, session overview, cron management, system metrics, and an agent status panel — all behind a single password gate.
@@ -7,7 +6,7 @@ A self-hosted web dashboard for the Hermes AI agent stack. Provides a browser-ba
 **Designed for:** Single-user local networks or reverse-proxied VPS deployments. Not a multi-tenant product.
 
 ---
-
+![Hermes Control Interface Demo](https://github.com/user-attachments/assets/995577ff-2017-4b3d-bb7f-b80310679157)
 ## Features
 
 - **Terminal** — Real PTY shell (node-pty) in the browser via xterm.js. Full ANSI colour, persistent session. Mobile-optimized (reduced scrollback, touch scroll).
