@@ -89,11 +89,10 @@ const els = {
   cronPanel: $('#cron-panel'),
   tokensPanel: $('#tokens-panel'),
   explorerPanel: $('#explorer-panel'),
-  knowledgePanel: $('#knowledge-panel'),
+  sidebarInfo: $('#sidebar-info'),
   sprite: $('#agent-sprite'),
   agentStateLabel: $('#agent-state-label'),
   agentDetails: $('#agent-details'),
-  markdownView: $('#markdown-view'),
   eventsCount: $('#events-count'),
   tokenProvider: $('#token-provider'),
   loadLabel: $('#load-label'),
@@ -898,9 +897,8 @@ function normalizeAgentState(rawState, details = '') {
 }
 
 function renderKnowledge(snapshot) {
-  if (!els.markdownView) return;
-  els.markdownView.innerHTML = markdownToHtml(snapshot.knowledge || '');
-  if (els.eventsCount) els.eventsCount.textContent = `${snapshot.logs?.length || 0} events`;
+  if (!els.sidebarInfo) return;
+  els.sidebarInfo.innerHTML = markdownToHtml(snapshot.knowledge || '');
 }
 
 function renderAgent(snapshot) {
@@ -1112,7 +1110,7 @@ function renderSnapshot(snapshot) {
   if (els.cronPanel && snapshotDataChanged(prev, snapshot, 'cronJobs')) renderCron(snapshot);
   if (els.tokensPanel && snapshotDataChanged(prev, snapshot, 'tokens')) renderTokens(snapshot);
   if (els.agentPanel) renderAgent(snapshot);
-  if (els.knowledgePanel && snapshotDataChanged(prev, snapshot, 'knowledge')) renderKnowledge(snapshot);
+  if (els.sidebarInfo && snapshotDataChanged(prev, snapshot, 'knowledge')) renderKnowledge(snapshot);
   if (els.explorerPanel && snapshotDataChanged(prev, snapshot, 'explorerRoots')) renderTreeRoots(snapshot);
   if (!state.terminal && els.terminalOutput) renderTerminalBuffer(snapshot.terminal);
 }
@@ -1271,10 +1269,10 @@ function setLayoutEditMode(enabled) {
   state.layoutEditMode = Boolean(enabled);
   document.body.classList.toggle('layout-edit-mode', state.layoutEditMode);
   if (els.layoutEditBtn) {
-    els.layoutEditBtn.textContent = state.layoutEditMode ? 'done editing' : 'edit layout';
+    els.layoutEditBtn.style.display = state.layoutEditMode ? 'none' : '';
   }
   if (els.layoutSaveBtn) {
-    els.layoutSaveBtn.disabled = !state.layoutEditMode;
+    els.layoutSaveBtn.style.display = state.layoutEditMode ? '' : 'none';
   }
 }
 
@@ -1374,10 +1372,31 @@ function initDragResize() {
       const w = Number(panel.dataset.w || '30');
       const h = Number(panel.dataset.h || '30');
       panel.style.position = 'absolute';
-      panel.style.left = `${Math.max(0, (x / 100) * rect.width)}px`;
-      panel.style.top = `${Math.max(0, (y / 100) * rect.height)}px`;
-      panel.style.width = `${Math.max(260, (w / 100) * rect.width)}px`;
-      panel.style.height = `${Math.max(190, (h / 100) * rect.height)}px`;
+      // Calculate raw pixel values
+      let left = Math.max(0, (x / 100) * rect.width);
+      let top = Math.max(0, (y / 100) * rect.height);
+      let width = Math.max(260, (w / 100) * rect.width);
+      let height = Math.max(190, (h / 100) * rect.height);
+      // Clamp to workspace bounds — prevent overflow on smaller screens
+      if (left + width > rect.width) {
+        width = Math.max(260, rect.width - left);
+      }
+      if (top + height > rect.height) {
+        height = Math.max(190, rect.height - top);
+      }
+      // If panel is still too wide for workspace, push it left
+      if (width > rect.width) {
+        width = rect.width - 4;
+        left = 2;
+      }
+      if (height > rect.height) {
+        height = rect.height - 4;
+        top = 2;
+      }
+      panel.style.left = `${left}px`;
+      panel.style.top = `${top}px`;
+      panel.style.width = `${width}px`;
+      panel.style.height = `${height}px`;
     });
   };
 

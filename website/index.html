@@ -40,7 +40,7 @@
       <button class="ghost-btn" id="refresh-btn">refresh</button>
       <button class="ghost-btn active" id="auto-refresh-btn">auto</button>
       <button class="ghost-btn" id="layout-edit-btn">edit layout</button>
-      <button class="ghost-btn" id="layout-save-btn" disabled>save layout</button>
+      <button class="ghost-btn" id="layout-save-btn" style="display:none;">save layout</button>
       <button class="ghost-btn" id="logout-btn">logout</button>
     </div>
   </header>
@@ -73,12 +73,16 @@
     </div>
   </section>
   <section class="side-section">
+    <div class="side-title">Quick actions</div>
+    <div id="quick-actions" class="quick-actions"></div>
+  </section>
+  <section class="side-section">
     <div class="side-title">Recent sessions</div>
     <div id="sessions-list" class="sessions-list"></div>
   </section>
   <section class="side-section">
-    <div class="side-title">Quick actions</div>
-    <div id="quick-actions" class="quick-actions"></div>
+    <div class="side-title">Information</div>
+    <div id="sidebar-info" class="sidebar-info"></div>
   </section>
     </aside>
 
@@ -160,21 +164,6 @@
             <div class="panel-head-right"><span class="mini-dot amber"></span><span class="mini-label" id="token-provider">router</span></div>
           </div>
           <div class="panel-body" id="tokens-panel"></div>
-          <div class="resize-handle"></div>
-        </article>
-
-        <article class="panel knowledge-panel" id="knowledge-panel" data-panel-id="knowledge" data-x="29" data-y="67" data-w="71" data-h="30">
-          <div class="panel-head drag-handle">
-            <span>INFORMATION</span>
-            <div class="panel-head-right"><span class="mini-dot amber"></span><span class="mini-label">memory</span></div>
-          </div>
-          <div class="panel-body knowledge-body">
-            <div class="markdown-toolbar">
-              <span>skills • models • config</span>
-              <span id="events-count">0 events</span>
-            </div>
-            <div id="markdown-view" class="markdown-view"></div>
-          </div>
           <div class="resize-handle"></div>
         </article>
       </div>

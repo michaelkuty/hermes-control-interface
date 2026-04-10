@@ -98,6 +98,10 @@ body {
 .sidebar-agent-section { display: flex; flex-direction: column; align-items: center; }
 .sidebar-agent-stage { position: relative; width: 108px; height: 108px; display: flex; align-items: center; justify-content: center; }
 .sidebar-agent-sprite { border-radius: 4px; image-rendering: pixelated; }
+.sidebar-info { font-size: 11px; line-height: 1.5; color: #9ca3af; max-height: 300px; overflow-y: auto; overflow-x: hidden; word-break: break-word; }
+.sidebar-info h1, .sidebar-info h2, .sidebar-info h3 { color: #ede6d4; font-size: 12px; margin: 8px 0 4px; }
+.sidebar-info pre { background: rgba(0,0,0,0.3); padding: 6px 8px; border-radius: 4px; overflow-x: auto; font-size: 10px; margin: 4px 0; }
+.sidebar-info code { font-family: 'JetBrains Mono', monospace; }
 .sidebar-agent-shadow { position: absolute; bottom: 0; left: 50%; transform: translateX(-50%); width: 80px; height: 12px; background: radial-gradient(ellipse, rgba(0,0,0,0.5) 0%, transparent 70%); }
 .sidebar-agent-info { text-align: center; width: 100%; margin-top: 6px; }
 .sidebar-agent-state { font-size: 13px; font-weight: 600; color: var(--gold); text-transform: capitalize; }
@@ -508,8 +512,10 @@ body.explorer-fullscreen .resize-handle { display: none; }
     display: grid;
     grid-template-columns: 1fr;
     gap: 10px;
+    overflow-x: hidden;
+    max-width: 100vw;
   }
-  .side-section { margin-bottom: 0; padding: 10px; }
+  .side-section { margin-bottom: 0; padding: 10px; overflow-x: hidden; }
   #main, #workspace { height: auto; overflow: visible; }
   #workspace { display: grid; gap: 10px; padding: 10px; }
   .panel {
