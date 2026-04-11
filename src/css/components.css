@@ -377,3 +377,65 @@
 .toggle.active::after {
   transform: translateX(18px);
 }
+
+/* Stat rows */
+.stat-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+.stat-row:last-child { border-bottom: none; }
+.stat-label {
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+.stat-value {
+  font-size: 12px;
+  font-weight: 500;
+}
+.status-ok { color: var(--green); }
+.status-off { color: var(--fg-subtle); }
+.status-warn { color: var(--amber); }
+.status-err { color: var(--red); }
+.error-msg { color: var(--red); font-size: 12px; padding: 8px 0; }
+
+/* Badge */
+.badge {
+  display: inline-block;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 4px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  color: var(--fg-muted);
+  vertical-align: middle;
+  margin-left: 8px;
+}
+
+/* Card actions */
+.card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.btn-sm {
+  padding: 5px 10px;
+  font-size: 11px;
+}
+
+/* Agent card hover */
+.agent-card {
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.agent-card:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-panel-hover);
+}

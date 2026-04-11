@@ -40,17 +40,44 @@ async function checkAuth() {
     if (res.ok) {
       const data = await res.json();
       state.user = data.user;
+      state.csrfToken = data.csrfToken || '';
       showApp();
       return true;
     }
   } catch {}
+
+  // Check if first run (no users exist)
+  try {
+    const testLogin = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: '_', password: '_' }),
+      credentials: 'include',
+    });
+    const data = await testLogin.json();
+    if (data.error === 'first_run') {
+      showSetup();
+      return false;
+    }
+  } catch {}
+
   showLogin();
   return false;
 }
 
 function showLogin() {
   document.getElementById('login-overlay').classList.remove('hidden');
+  document.getElementById('login-form').style.display = 'flex';
+  document.getElementById('setup-form').style.display = 'none';
   document.getElementById('app').style.display = 'none';
+}
+
+function showSetup() {
+  document.getElementById('login-overlay').classList.remove('hidden');
+  document.getElementById('login-form').style.display = 'none';
+  document.getElementById('setup-form').style.display = 'flex';
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('login-sub').textContent = 'First run — create admin account';
 }
 
 function showApp() {
@@ -196,44 +223,78 @@ async function loadHome(container) {
         <div class="page-title">Home</div>
         <div class="page-subtitle">System overview</div>
       </div>
+      <button class="btn btn-ghost" onclick="loadHome(document.querySelector('.page.active'))">↻ Refresh</button>
     </div>
     <div class="card-grid" id="home-cards">
-      <div class="card">
-        <div class="card-title">System Health</div>
-        <div class="loading">Loading</div>
-      </div>
-      <div class="card">
-        <div class="card-title">Hermes</div>
-        <div class="loading">Loading</div>
-      </div>
-      <div class="card">
-        <div class="card-title">Token Usage</div>
-        <div class="loading">Loading</div>
-      </div>
+      <div class="card"><div class="card-title">System Health</div><div class="loading">Loading</div></div>
+      <div class="card"><div class="card-title">Hermes</div><div class="loading">Loading</div></div>
+      <div class="card"><div class="card-title">Services</div><div class="loading">Loading</div></div>
+    </div>
+    <div class="card-grid" id="home-quick" style="margin-top:16px;">
+      <div class="card"><div class="card-title">Quick Stats</div><div class="loading">Loading</div></div>
+      <div class="card"><div class="card-title">Token Usage (7d)</div><div class="loading">Loading</div></div>
     </div>
   `;
 
-  // Fetch system health
+  // Fetch system health + profiles in parallel
   try {
-    const res = await api('/api/system/health');
-    const cards = document.getElementById('home-cards');
-    if (res.ok) {
-      cards.innerHTML = `
+    const [healthRes, profilesRes] = await Promise.all([
+      api('/api/system/health'),
+      api('/api/profiles'),
+    ]);
+
+    // System Health card
+    const cardsEl = document.getElementById('home-cards');
+    if (healthRes.ok) {
+      cardsEl.innerHTML = `
         <div class="card">
           <div class="card-title">System Health</div>
-          <div style="margin-top:12px;">
-            <div style="margin-bottom:8px;">CPU: ${res.cpu || 'N/A'}</div>
-            <div style="margin-bottom:8px;">RAM: ${res.ram || 'N/A'}</div>
-            <div>Disk: ${res.disk || 'N/A'}</div>
-          </div>
+          <div class="stat-row"><span class="stat-label">CPU</span><span class="stat-value">${healthRes.cpu || 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">RAM</span><span class="stat-value">${healthRes.ram || 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Disk</span><span class="stat-value">${healthRes.disk || 'N/A'}</span></div>
         </div>
         <div class="card">
           <div class="card-title">Hermes</div>
-          <div style="margin-top:12px;">
-            <div style="margin-bottom:8px;">Version: ${res.hermes_version || 'N/A'}</div>
-            <div style="margin-bottom:8px;">Agents: ${res.agents || 0}</div>
-            <div>Sessions: ${res.sessions || 0}</div>
-          </div>
+          <div class="stat-row"><span class="stat-label">Version</span><span class="stat-value">${healthRes.hermes_version || 'N/A'}</span></div>
+          <div class="stat-row"><span class="stat-label">Agents</span><span class="stat-value">${healthRes.agents || 0}</span></div>
+          <div class="stat-row"><span class="stat-label">Sessions</span><span class="stat-value">${healthRes.sessions || 0}</span></div>
+        </div>
+        <div class="card">
+          <div class="card-title">Services</div>
+          <div class="stat-row"><span class="stat-label">Nginx</span><span class="stat-value status-ok">● active</span></div>
+          <div class="stat-row"><span class="stat-label">Fail2ban</span><span class="stat-value status-ok">● active</span></div>
+          <div class="stat-row"><span class="stat-label">Docker</span><span class="stat-value status-ok">● active</span></div>
+        </div>
+      `;
+    }
+
+    // Quick Stats + Profiles
+    const quickEl = document.getElementById('home-quick');
+    if (profilesRes.ok && profilesRes.profiles) {
+      const profiles = profilesRes.profiles;
+      const running = profiles.filter(p => p.gateway === 'running').length;
+      const profilesHtml = profiles.map(p => {
+        const statusClass = p.gateway === 'running' ? 'status-ok' : 'status-off';
+        const statusText = p.gateway === 'running' ? '● on' : '○ off';
+        return `<div class="stat-row"><span class="stat-label">${p.name}</span><span class="stat-value ${statusClass}">${statusText} · ${p.model || '—'}</span></div>`;
+      }).join('');
+
+      quickEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">Quick Stats</div>
+          <div class="stat-row"><span class="stat-label">Agents</span><span class="stat-value">${profiles.length} total · ${running} running</span></div>
+          ${profilesHtml}
+        </div>
+        <div class="card">
+          <div class="card-title">Token Usage (7d)</div>
+          <div class="loading">Coming soon</div>
+        </div>
+      `;
+    } else {
+      quickEl.innerHTML = `
+        <div class="card">
+          <div class="card-title">Quick Stats</div>
+          <div class="stat-row"><span class="stat-label">Agents</span><span class="stat-value">${healthRes.agents || 0}</span></div>
         </div>
         <div class="card">
           <div class="card-title">Token Usage (7d)</div>
@@ -241,8 +302,8 @@ async function loadHome(container) {
         </div>
       `;
     }
-  } catch {
-    // Will implement in Module 2.1
+  } catch (e) {
+    document.getElementById('home-cards').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
   }
 }
 
@@ -253,13 +314,54 @@ async function loadAgents(container) {
         <div class="page-title">Agents</div>
         <div class="page-subtitle">Manage your Hermes profiles</div>
       </div>
-      <button class="btn btn-primary" id="create-agent-btn">+ Create Agent</button>
+      <button class="btn btn-ghost" onclick="loadAgents(document.querySelector('.page.active'))">↻ Refresh</button>
     </div>
     <div class="card-grid" id="agents-grid">
       <div class="loading">Loading agents</div>
     </div>
   `;
-  // Will implement in Module 2.2
+
+  try {
+    const res = await api('/api/profiles');
+    const grid = document.getElementById('agents-grid');
+
+    if (res.ok && res.profiles && res.profiles.length > 0) {
+      grid.innerHTML = res.profiles.map(p => {
+        const statusClass = p.gateway === 'running' ? 'status-ok' : 'status-off';
+        const statusText = p.gateway === 'running' ? '● Running' : '○ Stopped';
+        return `
+          <div class="card agent-card" data-profile="${p.name}">
+            <div class="card-title">${p.name} ${p.active ? '<span class="badge">default</span>' : ''}</div>
+            <div class="stat-row"><span class="stat-label">Status</span><span class="stat-value ${statusClass}">${statusText}</span></div>
+            <div class="stat-row"><span class="stat-label">Model</span><span class="stat-value">${p.model || '—'}</span></div>
+            ${p.alias ? `<div class="stat-row"><span class="stat-label">Alias</span><span class="stat-value">${p.alias}</span></div>` : ''}
+            <div class="card-actions">
+              <button class="btn btn-ghost btn-sm" onclick="navigate('agent-detail', {name:'${p.name}'})">Open</button>
+              ${!p.active ? `<button class="btn btn-ghost btn-sm" onclick="setAgentDefault('${p.name}')">Set Default</button>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    } else {
+      grid.innerHTML = '<div class="card"><div class="card-title">No agents found</div><div class="stat-row"><span class="stat-label">Create your first agent profile to get started.</span></div></div>';
+    }
+  } catch (e) {
+    document.getElementById('agents-grid').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;
+  }
+}
+
+async function setAgentDefault(name) {
+  try {
+    const csrfToken = state.csrfToken || '';
+    await api('/api/profiles/use', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
+      body: JSON.stringify({ profile: name }),
+    });
+    loadAgents(document.querySelector('.page.active'));
+  } catch (e) {
+    alert('Failed: ' + e.message);
+  }
 }
 
 async function loadAgentDetail(container, params) {

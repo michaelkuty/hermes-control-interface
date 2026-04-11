@@ -234,8 +234,7 @@ function parseCookies(req) {
 }
 
 function isAuthed(req) {
-  const cookies = parseCookies(req);
-  return verifyAuthToken(cookies[AUTH_COOKIE]);
+  return getCurrentUser(req) !== null;
 }
 
 function requireAuth(req, res, next) {
@@ -1004,6 +1003,54 @@ app.get('/api/session', (req, res) => {
   res.json(response);
 });
 
+// ============================================
+// Multi-User Auth (replaces single-password auth)
+// ============================================
+const {
+  isFirstRun, findUser, createUser, deleteUser,
+  verifyUserPassword, changePassword, resetUserPassword, listUsers,
+  audit, getAuditLog,
+  loadNotifications, addNotification, dismissNotification, clearNotifications,
+} = require('./auth');
+
+// Track current user in request (bound to token)
+const tokenToUser = new Map(); // token -> { username, role }
+
+function createAuthToken(username, role) {
+  const ts = String(Date.now());
+  const sig = hmac(ts + ':' + username);
+  const token = ts + '.' + sig;
+  tokenToUser.set(token, { username, role });
+  // Clean old tokens periodically
+  if (tokenToUser.size > 100) {
+    for (const [k] of tokenToUser) {
+      const [t] = k.split('.');
+      if (Date.now() - Number(t) > 24 * 60 * 60 * 1000) tokenToUser.delete(k);
+    }
+  }
+  return token;
+}
+
+function getCurrentUser(req) {
+  const cookies = parseCookies(req);
+  const token = cookies[AUTH_COOKIE];
+  if (!token) return null;
+  return tokenToUser.get(token) || null;
+}
+
+function requireRole(role) {
+  return (req, res, next) => {
+    const user = getCurrentUser(req);
+    if (!user) return res.status(401).json({ error: 'authentication required' });
+    if (role === 'admin' && user.role !== 'admin') {
+      audit(user.username, user.role, 'DENIED', `${req.method} ${req.path}`);
+      return res.status(403).json({ error: 'admin access required' });
+    }
+    req.hciUser = user;
+    next();
+  };
+}
+
 function verifyPassword(password) {
   // bcrypt hash check (preferred)
   if (CONTROL_PASSWORD.startsWith('$2b$') || CONTROL_PASSWORD.startsWith('$2a$')) {
@@ -1013,23 +1060,187 @@ function verifyPassword(password) {
   return safeTimingEqual(password, CONTROL_PASSWORD);
 }
 
-app.post('/api/login', loginRateLimiter, (req, res) => {
-  const ip = getClientIp(req);
-  const password = String(req.body?.password || '');
-  if (!verifyPassword(password)) {
-    log('auth.failed', `bad password from ip ${ip}`);
-    return res.status(401).json({ ok: false, error: 'bad password' });
-  }
-  const authToken = setAuthCookie(res);
-  const csrfToken = deriveCsrfToken(authToken);
-  log('auth.login', 'dashboard unlocked');
-  return res.json({ ok: true, csrfToken });
+// ============================================
+// Auth API Routes
+// ============================================
+
+// Check auth status / get current user
+app.get('/api/auth/me', (req, res) => {
+  const user = getCurrentUser(req);
+  if (!user) return res.status(401).json({ ok: false });
+  const csrfToken = deriveCsrfToken(parseCookies(req)[AUTH_COOKIE]);
+  res.json({ ok: true, user: { username: user.username, role: user.role }, csrfToken });
 });
 
-app.post('/api/logout', requireCsrf, (req, res) => {
+// First-run setup (create admin)
+app.post('/api/auth/setup', loginRateLimiter, (req, res) => {
+  if (!isFirstRun()) {
+    return res.status(400).json({ ok: false, error: 'Setup already completed' });
+  }
+  const { username, password } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ ok: false, error: 'Username and password required' });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ ok: false, error: 'Password must be at least 8 characters' });
+  }
+  const result = createUser(username, password, 'admin');
+  if (!result.ok) return res.status(400).json(result);
+
+  const authToken = createAuthToken(username, 'admin');
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${encodeURIComponent(authToken)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${24 * 60 * 60}; Secure`);
+  audit(username, 'admin', 'SETUP', 'first-run admin created');
+  addNotification('success', `Admin account created: ${username}`);
+  res.json({ ok: true, user: { username, role: 'admin' } });
+});
+
+// Login (multi-user)
+app.post('/api/auth/login', loginRateLimiter, (req, res) => {
+  const ip = getClientIp(req);
+  const { username, password } = req.body || {};
+
+  if (!username || !password) {
+    return res.status(400).json({ ok: false, error: 'Username and password required' });
+  }
+
+  // If no users exist, redirect to setup
+  if (isFirstRun()) {
+    return res.status(400).json({ ok: false, error: 'first_run', message: 'No users exist. Please create an admin account.' });
+  }
+
+  const user = verifyUserPassword(username, password);
+  if (!user) {
+    audit(username, 'unknown', 'LOGIN_FAILED', `bad credentials from ${ip}`);
+    return res.status(401).json({ ok: false, error: 'Invalid username or password' });
+  }
+
+  const authToken = createAuthToken(user.username, user.role);
+  res.setHeader('Set-Cookie', `${AUTH_COOKIE}=${encodeURIComponent(authToken)}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${24 * 60 * 60}; Secure`);
+  audit(user.username, user.role, 'LOGIN', `success from ${ip}`);
+  res.json({ ok: true, user: { username: user.username, role: user.role } });
+});
+
+// Logout
+app.post('/api/auth/logout', requireAuth, (req, res) => {
+  const user = getCurrentUser(req);
+  const cookies = parseCookies(req);
+  const token = cookies[AUTH_COOKIE];
+  if (token) tokenToUser.delete(token);
   clearAuthCookie(res);
-  log('auth.logout', 'dashboard locked');
+  if (user) audit(user.username, user.role, 'LOGOUT', '');
   res.json({ ok: true });
+});
+
+// Change own password
+app.post('/api/auth/change-password', requireAuth, (req, res) => {
+  const user = getCurrentUser(req);
+  const { current_password, new_password } = req.body || {};
+  if (!current_password || !new_password) {
+    return res.status(400).json({ ok: false, error: 'Current and new password required' });
+  }
+  const result = changePassword(user.username, current_password, new_password);
+  if (!result.ok) return res.status(400).json(result);
+  res.json({ ok: true });
+});
+
+// ============================================
+// User Management Routes (admin only)
+// ============================================
+
+// List users
+app.get('/api/users', requireRole('admin'), (req, res) => {
+  res.json({ ok: true, users: listUsers() });
+});
+
+// Create user
+app.post('/api/users', requireRole('admin'), (req, res) => {
+  const { username, password, role } = req.body || {};
+  if (!username || !password) {
+    return res.status(400).json({ ok: false, error: 'Username and password required' });
+  }
+  if (password.length < 8) {
+    return res.status(400).json({ ok: false, error: 'Password must be at least 8 characters' });
+  }
+  const userRole = role === 'admin' ? 'admin' : 'viewer';
+  const result = createUser(username, password, userRole);
+  if (!result.ok) return res.status(400).json(result);
+  addNotification('success', `User created: ${username} (${userRole})`);
+  res.json({ ok: true });
+});
+
+// Delete user
+app.delete('/api/users/:username', requireRole('admin'), (req, res) => {
+  const currentUser = getCurrentUser(req);
+  const result = deleteUser(req.params.username, currentUser.username);
+  if (!result.ok) return res.status(400).json(result);
+  addNotification('info', `User deleted: ${req.params.username}`);
+  res.json({ ok: true });
+});
+
+// Reset user password
+app.post('/api/users/:username/reset-password', requireRole('admin'), (req, res) => {
+  const currentUser = getCurrentUser(req);
+  const { new_password } = req.body || {};
+  if (!new_password) {
+    return res.status(400).json({ ok: false, error: 'New password required' });
+  }
+  const result = resetUserPassword(req.params.username, new_password, currentUser.username);
+  if (!result.ok) return res.status(400).json(result);
+  addNotification('info', `Password reset for ${req.params.username}`);
+  res.json({ ok: true });
+});
+
+// ============================================
+// Audit Log
+// ============================================
+app.get('/api/audit', requireRole('admin'), (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit || '100', 10), 500);
+  res.json({ ok: true, entries: getAuditLog(limit) });
+});
+
+// ============================================
+// Notifications API
+// ============================================
+app.get('/api/notifications', requireAuth, (req, res) => {
+  const notifs = loadNotifications();
+  res.json({ ok: true, notifications: notifs });
+});
+
+app.post('/api/notifications/:id/dismiss', requireAuth, (req, res) => {
+  dismissNotification(req.params.id);
+  res.json({ ok: true });
+});
+
+app.post('/api/notifications/clear', requireAuth, (req, res) => {
+  clearNotifications();
+  res.json({ ok: true });
+});
+
+// ============================================
+// System Health API
+// ============================================
+app.get('/api/system/health', requireAuth, async (req, res) => {
+  try {
+    const [cpu, ram, disk, version, agents, sessions] = await Promise.all([
+      shell("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'"),
+      shell("free -m | awk '/Mem:/ {printf \"%d/%dMB (%.0f%%)\", $3, $2, $3/$2*100}'"),
+      shell("df -h / | awk 'NR==2 {print $3\"/\"$2\" (\"$5\")\"}'"),
+      shell("hermes version 2>&1 | head -1"),
+      shell("hermes profile list 2>&1 | wc -l"),
+      shell("hermes sessions list --limit 1000 2>&1 | wc -l"),
+    ]);
+    res.json({
+      ok: true,
+      cpu: cpu.trim() || 'N/A',
+      ram: ram.trim() || 'N/A',
+      disk: disk.trim() || 'N/A',
+      hermes_version: version.trim() || 'N/A',
+      agents: Math.max(0, parseInt(agents.trim()) - 2) || 0, // subtract header lines
+      sessions: Math.max(0, parseInt(sessions.trim()) - 2) || 0,
+    });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
 });
 
 app.get('/api/dashboard-state', requireAuth, async (req, res) => {
