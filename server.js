@@ -1565,13 +1565,13 @@ app.post('/api/file', requireCsrf, (req, res) => {
 
 // File listing API for File Explorer
 app.get('/api/files/list', requireAuth, (req, res) => {
-  const dirPath = String(req.query.path || '');
+  const dirPath = String(req.query.path || '').replace(/^\/+/, '');
   const baseDir = path.join(os.homedir(), '.hermes');
   
   // Security: ensure we stay within .hermes
   const resolved = path.resolve(baseDir, dirPath);
   if (!resolved.startsWith(baseDir)) {
-    return res.status(403).json({ error: 'access denied' });
+    return res.status(403).json({ error: 'path outside allowed roots' });
   }
   
   try {

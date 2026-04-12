@@ -544,7 +544,7 @@ async function loadAgentSessions(container, name) {
       </div>
     </div>
     <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;">
-      <input type="text" id="session-search" placeholder="Search sessions..." style="flex:1;" />
+      <input type="text" id="session-search" class="search-input" placeholder="Search sessions..." style="flex:1;width:auto;" />
       <button class="btn btn-ghost" onclick="loadAgentSessions(document.getElementById('agent-tab-content'), '${name}')">↻ Refresh</button>
     </div>
     <div id="sessions-table">
@@ -732,10 +732,10 @@ async function loadXtermAndConnect(command) {
       fontSize: 13,
       fontFamily: "'JetBrains Mono', monospace",
       theme: {
-        background: '#062e27',
-        foreground: '#e8f5f0',
-        cursor: '#67f0a2',
-        selectionBackground: 'rgba(103, 240, 162, 0.3)',
+        background: '#0b201f',
+        foreground: '#dccbb5',
+        cursor: '#7c945c',
+        selectionBackground: 'rgba(124, 148, 92, 0.3)',
       },
     });
 
@@ -839,7 +839,7 @@ async function renameSession(sessionId, currentTitle) {
       body: JSON.stringify({ title: newTitle }),
     });
     showToast('Session renamed', 'success');
-    loadAgentSessions(document.getElementById('agent-tab-content'), state.currentAgent);
+    setTimeout(() => loadAgentSessions(document.getElementById('agent-tab-content'), state.currentAgent), 500);
   } catch (e) {
     showToast('Rename failed: ' + e.message, 'error');
   }
@@ -873,7 +873,7 @@ async function deleteSession(sessionId, profileName) {
       headers: { 'X-CSRF-Token': csrfToken },
     });
     showToast('Session deleted', 'success');
-    loadAgentSessions(document.getElementById('agent-tab-content'), profileName);
+    setTimeout(() => loadAgentSessions(document.getElementById('agent-tab-content'), profileName), 500);
   } catch (e) {
     showToast('Delete failed: ' + e.message, 'error');
   }
@@ -2191,7 +2191,15 @@ let termInstance = null;
 
 function terminalKey(key) {
   if (!termWs || termWs.readyState !== 1) return;
-  const data = key === 'Enter' ? '\r' : key;
+  const keyMap = {
+    'ArrowUp': '\x1b[A',
+    'ArrowDown': '\x1b[B',
+    'ArrowLeft': '\x1b[D',
+    'ArrowRight': '\x1b[C',
+    'Enter': '\r',
+    ' ': ' ',
+  };
+  const data = keyMap[key] || key;
   termWs.send(JSON.stringify({ type: 'terminal-input', data }));
 }
 

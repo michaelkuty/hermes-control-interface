@@ -331,11 +331,11 @@
   right: 0;
   margin-top: 4px;
   min-width: 180px;
-  background: var(--bg-panel);
-  border: 1px solid var(--border);
+  background: var(--bg-base);
+  border: 1px solid var(--border-strong);
   border-radius: var(--radius);
-  backdrop-filter: blur(16px);
   overflow: hidden;
+  box-shadow: var(--shadow);
 }
 
 .dropdown-item {
@@ -362,7 +362,7 @@
 }
 .card:hover {
   border-color: var(--border-strong);
-  box-shadow: 0 0 20px rgba(255, 172, 2, 0.04);
+  box-shadow: 0 0 20px rgba(124, 148, 92, 0.04);
 }
 
 /* Agent card clickable */
@@ -371,7 +371,7 @@
 }
 .agent-card:hover {
   border-color: var(--fg) !important;
-  box-shadow: 0 0 30px rgba(255, 172, 2, 0.08);
+  box-shadow: 0 0 30px rgba(124, 148, 92, 0.08);
 }
 
 /* Notif dropdown */
@@ -420,10 +420,10 @@
 
 /* Button hover glow */
 .btn-primary:hover {
-  box-shadow: 0 0 12px rgba(255, 172, 2, 0.2);
+  box-shadow: 0 0 12px rgba(124, 148, 92, 0.2);
 }
 .btn-ghost:hover {
-  box-shadow: 0 0 8px rgba(255, 172, 2, 0.08);
+  box-shadow: 0 0 8px rgba(124, 148, 92, 0.08);
 }
 
 /* Topbar glow on active */
