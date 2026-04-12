@@ -223,7 +223,10 @@ async function loadHome(container) {
         <div class="page-title">Home</div>
         <div class="page-subtitle">System overview</div>
       </div>
-      <button class="btn btn-ghost" onclick="loadHome(document.querySelector('.page.active'))">↻ Refresh</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-primary" onclick="openTerminalPanel('Hermes CLI', '')">⌘ Terminal</button>
+        <button class="btn btn-ghost" onclick="loadHome(document.querySelector('.page.active'))">↻ Refresh</button>
+      </div>
     </div>
     <div class="card-grid" id="home-cards">
       <div class="card"><div class="card-title">System Health</div><div class="loading">Loading</div></div>
@@ -441,7 +444,11 @@ async function loadAgentDetail(container, params) {
         <div class="page-title">Agent: ${name}</div>
         <div class="page-subtitle">Agent detail</div>
       </div>
-      <button class="btn btn-ghost" onclick="navigate('agents')">← Back to Agents</button>
+      <div style="display:flex;gap:8px;">
+        <button class="btn btn-ghost" onclick="openTerminalPanel('Setup ${name}', 'hermes -p ${name} setup')">⚙ Setup</button>
+        <button class="btn btn-primary" onclick="openTerminalPanel('Terminal ${name}', 'hermes -p ${name}')">⌘ Terminal</button>
+        <button class="btn btn-ghost" onclick="navigate('agents')">← Back</button>
+      </div>
     </div>
     <div class="tabs" id="agent-tabs">
       <button class="tab active" data-tab="dashboard">Dashboard</button>
@@ -725,15 +732,30 @@ async function loadXtermAndConnect(command) {
     term.open(bodyEl);
     fitAddon.fit();
 
+    term.write('Connecting...\r\n');
+
+    // Ensure terminal session exists
+    try {
+      await api('/api/terminal/ensure', { method: 'POST' });
+    } catch {}
+
     // Connect WebSocket
     const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
     const ws = new WebSocket(`${wsProtocol}//${location.host}/ws`);
+
+    let commandSent = false;
+
     ws.onopen = () => {
-      // Wait for terminal to be ready, then send command
+      term.write('Connected.\r\n');
+      // Send command after short delay
       setTimeout(() => {
-        ws.send(JSON.stringify({ type: 'terminal-input', data: command + '\r' }));
-      }, 500);
+        if (command) {
+          ws.send(JSON.stringify({ type: 'terminal-input', data: command + '\r' }));
+          commandSent = true;
+        }
+      }, 300);
     };
+
     ws.onmessage = (e) => {
       try {
         const msg = JSON.parse(e.data);
@@ -745,19 +767,28 @@ async function loadXtermAndConnect(command) {
         }
       } catch {}
     };
+
+    ws.onerror = () => {
+      term.write('\r\n[WebSocket error]\r\n');
+    };
+
     ws.onclose = () => {
-      term.write('\r\n[Connection closed]');
+      term.write('\r\n[Connection closed]\r\n');
     };
 
     // Send user input
     term.onData((data) => {
-      ws.send(JSON.stringify({ type: 'terminal-input', data }));
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'terminal-input', data }));
+      }
     });
 
-    // Resize
+    // Resize handler
     const resizeHandler = () => {
       fitAddon.fit();
-      ws.send(JSON.stringify({ type: 'terminal-resize', cols: term.cols, rows: term.rows }));
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: 'terminal-resize', cols: term.cols, rows: term.rows }));
+      }
     };
     window.addEventListener('resize', resizeHandler);
 
@@ -1405,10 +1436,22 @@ async function loadAudit() {
   try {
     const res = await api('/api/audit');
     const el = document.getElementById('audit-log');
-    if (res.ok && res.entries) {
-      el.innerHTML = res.entries.slice(0, 10).map(e => `
-        <div style="font-size:10px;color:var(--fg-muted);padding:2px 0;">[${e.timestamp}] ${e.user}: ${e.action}</div>
-      `).join('') || '<div class="stat-row"><span class="stat-label">No audit entries</span></div>';
+    if (res.ok && res.entries && res.entries.length > 0) {
+      el.innerHTML = res.entries.slice(0, 10).map(line => {
+        // Parse: [timestamp] [user] [role] ACTION: details
+        const match = line.match(/^\[([^\]]+)\]\s*\[([^\]]+)\]\s*\[([^\]]+)\]\s*(.+)$/);
+        if (match) {
+          const [, ts, user, role, action] = match;
+          const time = new Date(ts).toLocaleString();
+          const isDenied = action.includes('DENIED');
+          return `<div style="font-size:11px;padding:3px 0;color:${isDenied ? 'var(--red)' : 'var(--fg-muted)'};">
+            <span style="color:var(--fg-subtle);">${time}</span>
+            <span style="color:var(--accent);margin:0 4px;">${user}</span>
+            ${action}
+          </div>`;
+        }
+        return `<div style="font-size:11px;padding:2px 0;color:var(--fg-muted);">${escapeHtml(line)}</div>`;
+      }).join('');
     } else {
       el.innerHTML = '<div class="stat-row"><span class="stat-label">No audit entries</span></div>';
     }

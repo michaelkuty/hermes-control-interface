@@ -1425,6 +1425,16 @@ app.post('/api/file', requireCsrf, (req, res) => {
   }
 });
 
+// Ensure terminal session exists
+app.post('/api/terminal/ensure', requireAuth, (req, res) => {
+  try {
+    const session = ensureTerminalSession();
+    res.json({ ok: true, ready: session.ready, cwd: session.cwd });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
 app.post('/api/terminal/exec', requireCsrf, (req, res) => {
   const command = String(req.body?.command || '').trim();
   if (!command) return res.status(400).json({ error: 'command required' });
