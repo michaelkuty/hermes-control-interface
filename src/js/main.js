@@ -235,9 +235,11 @@ async function loadHome(container) {
     <div class="card-grid" id="home-cards">
       <div class="card"><div class="card-title">System Health</div><div class="loading">Loading</div></div>
       <div class="card"><div class="card-title">Agent Overview</div><div class="loading">Loading</div></div>
+      <div class="card home-image-card" id="home-image-card"></div>
     </div>
     <div class="card-grid" id="home-bottom" style="margin-top:16px;">
       <div class="card"><div class="card-title">Gateways</div><div class="loading">Loading</div></div>
+      <div class="card"><div class="card-title">Quick Stats</div><div class="loading">Loading</div></div>
       <div class="card"><div class="card-title">Token Usage (7d)</div><div class="loading">Loading</div></div>
     </div>
   `;
@@ -274,9 +276,10 @@ async function loadHome(container) {
       `;
     }
 
-    // Row 2: Gateways + Token Usage
+    // Row 2: Gateways + Quick Stats + Token Usage
     const bottomEl = document.getElementById('home-bottom');
     const profiles = profilesRes.ok && profilesRes.profiles ? profilesRes.profiles : [];
+    const running = profiles.filter(p => p.gateway === 'running').length;
     const gwHtml = profiles.map(p => {
       const cls = p.gateway === 'running' ? 'status-ok' : 'status-off';
       const txt = p.gateway === 'running' ? '● running' : '○ stopped';
@@ -287,6 +290,12 @@ async function loadHome(container) {
       <div class="card">
         <div class="card-title">Gateways</div>
         ${gwHtml || '<div class="stat-row"><span class="stat-label">No profiles</span></div>'}
+      </div>
+      <div class="card">
+        <div class="card-title">Quick Stats</div>
+        <div class="stat-row"><span class="stat-label">Version</span><span class="stat-value">${healthRes.hermes_version || 'N/A'}</span></div>
+        <div class="stat-row"><span class="stat-label">Agents</span><span class="stat-value">${profiles.length} total · ${running} running</span></div>
+        <div class="stat-row"><span class="stat-label">Sessions</span><span class="stat-value">${healthRes.sessions || 0}</span></div>
       </div>
       <div class="card">
         <div class="card-title">Token Usage (7d)</div>
@@ -605,7 +614,7 @@ async function loadAgentSessions(container, name) {
                   <td>
                     <div style="display:flex;gap:4px;">
                       <button class="btn btn-ghost btn-sm" onclick="resumeSession('${s.id}')" title="Resume in CLI">▶</button>
-                      <button class="btn btn-ghost btn-sm" onclick="renameSession('${s.id}', '${(s.title || '').replace(/'/g, "\\'")}')" title="Rename">✎</button>
+                      <button class="btn btn-ghost btn-sm" onclick="renameSession('${s.id}', '${(s.title || '').replace(/'/g, "\\'")}', '${name}')" title="Rename">✎</button>
                       <button class="btn btn-ghost btn-sm" onclick="exportSession('${s.id}')" title="Export">↓</button>
                       <button class="btn btn-ghost btn-sm btn-danger" onclick="deleteSession('${s.id}', '${name}')" title="Delete">×</button>
                     </div>
@@ -828,7 +837,7 @@ async function loadXtermAndConnect(command) {
   }
 }
 
-async function renameSession(sessionId, currentTitle) {
+async function renameSession(sessionId, currentTitle, profileName) {
   const newTitle = await customPrompt('New session title:', currentTitle);
   if (newTitle === null || newTitle === currentTitle) return;
   try {
@@ -839,7 +848,8 @@ async function renameSession(sessionId, currentTitle) {
       body: JSON.stringify({ title: newTitle }),
     });
     showToast('Session renamed', 'success');
-    setTimeout(() => loadAgentSessions(document.getElementById('agent-tab-content'), state.currentAgent), 500);
+    const agent = profileName || state.currentAgent;
+    setTimeout(() => loadAgentSessions(document.getElementById('agent-tab-content'), agent), 1000);
   } catch (e) {
     showToast('Rename failed: ' + e.message, 'error');
   }
@@ -873,7 +883,7 @@ async function deleteSession(sessionId, profileName) {
       headers: { 'X-CSRF-Token': csrfToken },
     });
     showToast('Session deleted', 'success');
-    setTimeout(() => loadAgentSessions(document.getElementById('agent-tab-content'), profileName), 500);
+    setTimeout(() => loadAgentSessions(document.getElementById('agent-tab-content'), profileName), 1000);
   } catch (e) {
     showToast('Delete failed: ' + e.message, 'error');
   }
@@ -914,7 +924,7 @@ async function loadAgentGateway(container, name) {
             <button class="tab" data-log="gateway">Gateway</button>
             <button class="tab" data-log="errors">Errors</button>
           </div>
-          <select id="log-level" style="margin-left:auto;">
+          <select id="log-level" class="log-level-select" style="margin-left:auto;">
             <option value="">All levels</option>
             <option value="WARNING">WARNING+</option>
             <option value="ERROR">ERROR+</option>
@@ -1030,8 +1040,8 @@ async function loadAgentConfig(container, name) {
     container.innerHTML = `
       <div style="margin-bottom:12px;">
         <div class="tabs" id="config-tabs" style="margin:0;">
-          ${categories.map((c, i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-cat="${c.key}">${c.icon} ${c.label}</button>`).join('')}
-          <button class="tab" data-cat="raw">📋 Raw YAML</button>
+          ${categories.map((c, i) => `<button class="tab ${i === 0 ? 'active' : ''}" data-cat="${c.key}">${c.label}</button>`).join('')}
+          <button class="tab" data-cat="raw">Raw YAML</button>
         </div>
       </div>
       <div id="config-content">
@@ -1214,25 +1224,11 @@ async function loadUsage(container) {
       document.getElementById(id)?.addEventListener('change', fetchUsageData);
     });
 
-    // Bind refresh button (NOT filter change events)
-    document.querySelector('#usage-overview + div .btn, #usage-overview ~ div .btn, #usage-tools + div .btn, [onclick*="loadUsage"]')?.addEventListener('click', (e) => {
+    // Refresh button — uses current filter values
+    document.querySelector('[onclick*="loadUsage"]')?.addEventListener('click', (e) => {
       e.preventDefault();
       fetchUsageData();
     });
-
-    // Add reset button
-    const btnDiv = document.querySelector('#usage-days')?.parentElement;
-    if (btnDiv) {
-      const resetBtn = document.createElement('button');
-      resetBtn.className = 'btn btn-ghost';
-      resetBtn.textContent = '⟳ Reset';
-      resetBtn.onclick = () => {
-        document.getElementById('usage-days').value = '7';
-        document.getElementById('usage-agent').value = '';
-        fetchUsageData();
-      };
-      btnDiv.appendChild(resetBtn);
-    }
 
   } catch (e) {
     document.getElementById('usage-overview').innerHTML = `<div class="card"><div class="card-title">Error</div><div class="error-msg">${e.message}</div></div>`;

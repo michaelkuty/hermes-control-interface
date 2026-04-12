@@ -156,6 +156,18 @@
   gap: 16px;
 }
 
+/* Home image card */
+.home-image-card {
+  background-image: url('https://portal.nousresearch.com/hermes-agent-bg.jpg');
+  background-size: cover;
+  background-position: center;
+  min-height: 200px;
+  border: 1px solid var(--border);
+}
+.home-image-card:hover {
+  border-color: var(--border-strong);
+}
+
 /* Search input */
 .search-input {
   padding: 8px 12px;
