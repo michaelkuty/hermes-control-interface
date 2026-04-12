@@ -762,15 +762,20 @@ async function loadXtermAndConnect(command) {
 
     ws.onopen = () => {
       term.write('Connected.\r\n');
-      // Send command after delay (wait for PTY ready + flush ANSI garbage)
+      // Send command after delay (wait for PTY ready)
       setTimeout(() => {
         if (command && !commandSent) {
-          // Clear terminal first to remove ANSI escape artifacts
-          ws.send(JSON.stringify({ type: 'terminal-input', data: 'clear\r' }));
+          // Step 1: Ctrl+C to cancel any running command
+          ws.send(JSON.stringify({ type: 'terminal-input', data: '\x03' }));
           setTimeout(() => {
-            term.write(`\x1b[90m$ ${command}\x1b[0m\r\n`);
-            ws.send(JSON.stringify({ type: 'terminal-input', data: command + '\r' }));
-            commandSent = true;
+            // Step 2: Clear terminal
+            ws.send(JSON.stringify({ type: 'terminal-input', data: 'clear\r' }));
+            setTimeout(() => {
+              // Step 3: Run actual command
+              term.write(`\x1b[90m$ ${command}\x1b[0m\r\n`);
+              ws.send(JSON.stringify({ type: 'terminal-input', data: command + '\r' }));
+              commandSent = true;
+            }, 500);
           }, 500);
         }
       }, 2000);
@@ -833,13 +838,13 @@ async function renameSession(sessionId, currentTitle, profileName) {
   if (newTitle === null || newTitle === currentTitle) return;
   try {
     const csrfToken = state.csrfToken || '';
+    const agent = profileName || state.currentAgent;
     await api(`/api/sessions/${sessionId}/rename`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-      body: JSON.stringify({ title: newTitle }),
+      body: JSON.stringify({ title: newTitle, profile: agent }),
     });
     showToast('Session renamed', 'success');
-    const agent = profileName || state.currentAgent;
     setTimeout(() => loadAgentSessions(document.getElementById('agent-tab-content'), agent), 2000);
   } catch (e) {
     showToast('Rename failed: ' + e.message, 'error');
@@ -869,7 +874,8 @@ async function deleteSession(sessionId, profileName) {
   if (!await customConfirm(`Delete session ${sessionId}?`)) return;
   try {
     const csrfToken = state.csrfToken || '';
-    await api(`/api/sessions/${sessionId}`, {
+    const profile = profileName || state.currentAgent;
+    await api(`/api/sessions/${sessionId}?profile=${encodeURIComponent(profile)}`, {
       method: 'DELETE',
       headers: { 'X-CSRF-Token': csrfToken },
     });

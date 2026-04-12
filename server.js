@@ -471,7 +471,8 @@ function safeStat(filePath) {
 }
 
 function readFileSafe(filePath, maxBytes = 120_000) {
-  const abs = path.resolve(filePath);
+  const rel = String(filePath || '').replace(/^\/+/, '');
+  const abs = path.resolve(CONTROL_HOME, rel);
   if (!isAllowedPath(abs)) throw new Error('path outside allowed roots');
   const stat = safeStat(abs);
   if (!stat) throw new Error('file not found');
@@ -481,7 +482,8 @@ function readFileSafe(filePath, maxBytes = 120_000) {
 }
 
 function writeFileSafe(filePath, content) {
-  const abs = path.resolve(filePath);
+  const rel = String(filePath || '').replace(/^\/+/, '');
+  const abs = path.resolve(CONTROL_HOME, rel);
   if (!isAllowedPath(abs)) throw new Error('path outside allowed roots');
   const stat = safeStat(abs);
   if (!stat) throw new Error('file not found');
@@ -1993,7 +1995,9 @@ app.post('/api/sessions/:id/rename', requireCsrf, async (req, res) => {
     if (!sessionId) return res.status(400).json({ ok: false, error: 'invalid session id' });
     const title = sanitizeTitle(req.body?.title);
     if (!title) return res.status(400).json({ ok: false, error: 'invalid title (allowed: a-z, A-Z, 0-9, spaces, basic punctuation)' });
-    const output = await shell(`hermes sessions rename ${sessionId} \"${title.replace(/\"/g, '\\\\\"')}\" 2>&1`);
+    const profile = req.body?.profile || '';
+    const profileFlag = profile ? `-p ${sanitizeProfileName(profile)} ` : '';
+    const output = await shell(`hermes ${profileFlag}sessions rename ${sessionId} \\\"${title.replace(/\"/g, '\\\\\"')}\\\" 2>&1`);
     audit(req.hciUser?.username || 'unknown', req.hciUser?.role || 'unknown', 'SESSION_RENAME', `${req.params.id} → ${title}`);
     addNotification('info', `Session renamed: ${sessionId.slice(0, 12)}… → ${title}`);
     res.json({ ok: true, output });
@@ -2022,7 +2026,9 @@ app.delete('/api/sessions/:id', requireCsrf, async (req, res) => {
   try {
     const sessionId = sanitizeSessionId(req.params.id);
     if (!sessionId) return res.status(400).json({ ok: false, error: 'invalid session id' });
-    const output = await shell(`hermes sessions delete --yes ${sessionId} 2>&1`);
+    const profile = req.body?.profile || req.query?.profile || '';
+    const profileFlag = profile ? `-p ${sanitizeProfileName(profile)} ` : '';
+    const output = await shell(`hermes ${profileFlag}sessions delete --yes ${sessionId} 2>&1`);
     audit(req.hciUser?.username || 'unknown', req.hciUser?.role || 'unknown', 'SESSION_DELETE', req.params.id);
     addNotification('info', `Session deleted: ${sessionId.slice(0, 12)}…`);
     res.json({ ok: true, output });
