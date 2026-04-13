@@ -3,27 +3,68 @@
 A self-hosted web dashboard for the [Hermes AI agent](https://github.com/NousResearch/hermes-agent) stack. Browser-based terminal, file explorer, session management, cron scheduling, token analytics, and multi-agent administration — all behind a password gate.
 
 **Stack:** Vanilla JS + Vite · Node.js · Express · WebSocket · xterm.js
-**Version:** 3.0.0
+**Version:** 3.1.0
+
+---
+
+## Key Features
+
+### Skills Hub
+Browse, search, preview, and install skills from the official registry. Install to any agent profile with one click.
+
+![Skills Hub (dark)](docs/screenshots/dark/04-skills.png)
+
+### Agent Skills Management
+View installed skills per agent, update, uninstall, and check for updates — all from the agent detail page.
+
+![Agent Skills (dark)](docs/screenshots/dark/12-agent-skills.png)
+
+### Honcho Memory Panel
+Rich integration with [Honcho](https://github.com/plastic-labs/honcho) cross-session memory. Shows connection status, peer configuration, recall mode, and AI representation.
+
+![Memory (dark)](docs/screenshots/dark/11-agent-memory.png)
+
+### Gateway Connections
+Real platform data from `hermes status --all`. Per-platform connection status for Telegram, Discord, WhatsApp, Signal, and more.
+
+![Gateway (dark)](docs/screenshots/dark/09-agent-gateway.png)
+
+### Multi-Agent Management
+Manage multiple Hermes profiles from one dashboard. Each agent runs independently with its own gateway, config, skills, and cron jobs.
+
+![Agents (dark)](docs/screenshots/dark/02-agents.png)
 
 ---
 
 ## Screenshots
 
-| Home | Agents |
-|------|--------|
-| ![Home](docs/screenshots/01-home.png) | ![Agents](docs/screenshots/02-agents.png) |
+### Dark Mode
 
-| Usage & Analytics | Skills Marketplace |
-|-------------------|--------------------|
-| ![Usage](docs/screenshots/03-usage.png) | ![Skills](docs/screenshots/04-skills.png) |
+| Home | Agents | Usage & Analytics |
+|------|--------|-------------------|
+| ![Home](docs/screenshots/dark/01-home.png) | ![Agents](docs/screenshots/dark/02-agents.png) | ![Usage](docs/screenshots/dark/03-usage.png) |
 
-| Maintenance | File Explorer |
-|-------------|---------------|
-| ![Maintenance](docs/screenshots/05-maintenance.png) | ![Files](docs/screenshots/06-files.png) |
+| Skills Hub | Maintenance | File Explorer |
+|------------|-------------|---------------|
+| ![Skills](docs/screenshots/dark/04-skills.png) | ![Maintenance](docs/screenshots/dark/05-maintenance.png) | ![Files](docs/screenshots/dark/06-files.png) |
 
-| Agent Detail | Cron Jobs |
+| Agent Dashboard | Gateway & Connections | Memory & Honcho |
+|-----------------|----------------------|-----------------|
+| ![Dashboard](docs/screenshots/dark/07-agent-dashboard.png) | ![Gateway](docs/screenshots/dark/09-agent-gateway.png) | ![Memory](docs/screenshots/dark/11-agent-memory.png) |
+
+| Agent Skills | Cron Jobs |
 |--------------|-----------|
-| ![Agent Detail](docs/screenshots/07-agent-detail.png) | ![Cron](docs/screenshots/08-cron-tab.png) |
+| ![Skills](docs/screenshots/dark/12-agent-skills.png) | ![Cron](docs/screenshots/dark/13-agent-cron.png) |
+
+### Light Mode
+
+| Home | Agents | Skills Hub |
+|------|--------|------------|
+| ![Home](docs/screenshots/light/01-home.png) | ![Agents](docs/screenshots/light/02-agents.png) | ![Skills](docs/screenshots/light/04-skills.png) |
+
+| Gateway | Memory |
+|---------|--------|
+| ![Gateway](docs/screenshots/light/09-agent-gateway.png) | ![Memory](docs/screenshots/light/11-agent-memory.png) |
 
 ---
 
