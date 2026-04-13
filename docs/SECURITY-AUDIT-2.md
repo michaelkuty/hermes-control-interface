@@ -177,11 +177,11 @@ res.setHeader('Set-Cookie', `${AUTH_COOKIE}=...; HttpOnly; SameSite=Lax; Path=/;
 
 | Environment | Status | Notes |
 |---|---|---|
-| Linux (Ubuntu 22.04) | ✅ Works | Tested on vm1.panji.me |
+| Linux (Ubuntu 22.04) | ✅ Works | Tested on your-server |
 | Minimal VPS (2GB RAM) | ✅ Works | ~75MB RSS, fits in 2GB |
 | Docker | ⚠️ Untested | node-pty needs build tools, PTY needs `--privileged` |
 | Non-root user | ❌ Untested | Needs systemd service config |
-| nginx reverse proxy | ✅ Works | agent2.panji.me proxy_pass |
+| nginx reverse proxy | ✅ Works | your-domain.com proxy_pass |
 | Cloudflare | ⚠️ WebSocket needs `ws://` or Cloudflare Spectrum |
 
 ---

@@ -2,7 +2,7 @@
 
 **Date:** 2026-04-12
 **Auditor:** David Bayendor
-**Target:** `/root/projects/hci-staging` (agent2.panji.me:10274)
+**Target:** `/root/projects/hci-staging` (your-domain.com:10274)
 **Version:** 2.0.0
 **Node:** >=20.0.0
 **Scope:** Full-stack security review — backend, frontend, auth, dependencies, deployment config
@@ -154,7 +154,7 @@ const server = app.listen(PORT, '0.0.0.0', () => { ... });
 **Evidence:**
 - `ss -tlnp` shows `0.0.0.0:10274` listening on all interfaces
 - No nginx reverse proxy configured for this port
-- UFW does NOT have port 10274 in allowed rules (but iptables INPUT policy is DROP with exceptions, and server is reachable externally via agent2.panji.me)
+- UFW does NOT have port 10274 in allowed rules (but iptables INPUT policy is DROP with exceptions, and server is reachable externally via your-domain.com)
 
 **Risk:** All traffic including auth cookies, CSRF tokens, and session data travels in plaintext. Anyone on the network path can intercept credentials.
 

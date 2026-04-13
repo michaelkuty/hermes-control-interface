@@ -80,7 +80,6 @@ Commits: 17 (lokal, belum push)
 - File Explorer: read + save working
 - Theme: dark + light modes with custom palette
 - Notifications: system alerts + CRUD actions + gateway events
-- Staging: agent2.panji.me:10274
 - Source: src/ (Vite) → dist/ (served by server.js)
 - Build: `npx vite build`
-- 17 commits lokal, belum push ke GitHub
+- 28 commits lokal, belum push ke GitHub
