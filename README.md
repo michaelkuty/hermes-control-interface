@@ -193,7 +193,7 @@ See `docs/API.md` for full reference.
 ## Security Audit
 
 Full audit: `docs/SECURITY-AUDIT-2.md`
-Score: 7.2/10 — Production-ready with caveats.
+Score: 9.1/10 — Production-ready with caveats.
 
 ## License
 
