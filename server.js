@@ -45,6 +45,24 @@ const AUTH_COOKIE = 'hermes_control_auth';
 const PROJECT_ROOT = __dirname;
 const PROJECTS_ROOT = process.env.HERMES_PROJECTS_ROOT || path.dirname(PROJECT_ROOT);
 
+// Dynamic identity — works for root and non-root users
+const HCI_USER = os.userInfo().username;
+const HCI_HOST = os.hostname();
+const HCI_IDENTITY = `${HCI_USER}@${HCI_HOST}`;
+const IS_ROOT = process.getuid() === 0;
+// systemctl/journalctl: add --user flag for non-root
+const SYSTEMD_USER_FLAG = IS_ROOT ? '' : '--user';
+// XDG_RUNTIME_DIR: required for systemctl --user to work
+// Auto-detect if not set (e.g. running via sudo -u without login session)
+if (!IS_ROOT && !process.env.XDG_RUNTIME_DIR) {
+  const uid = process.getuid();
+  const runtimeDir = `/run/user/${uid}`;
+  if (require('fs').existsSync(runtimeDir)) {
+    process.env.XDG_RUNTIME_DIR = runtimeDir;
+  }
+}
+
+
 // Cookie helper — conditionally adds Secure flag for HTTPS
 function setAuthCookie(res, token, maxAge = 86400) {
   const secure = res.req?.secure || res.req?.get('X-Forwarded-Proto') === 'https';
@@ -113,7 +131,7 @@ app.use(helmet({
   hsts: false,
 }));
 
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'dist')));
 app.use('/vendor/xterm', express.static(path.join(__dirname, 'node_modules/@xterm/xterm')));
 app.use('/vendor/xterm-addon-fit', express.static(path.join(__dirname, 'node_modules/@xterm/addon-fit')));
@@ -145,7 +163,7 @@ const terminalSession = {
   proc: null,
   startedAt: null,
   buffer: '',
-  prompt: `root@hermes:${PROJECT_ROOT}# `,
+  prompt: `${HCI_IDENTITY}:${PROJECT_ROOT}# `,
   cwd: PROJECT_ROOT,
   ready: false,
   lastError: null,
@@ -372,7 +390,11 @@ function stopLogStream() {
 }
 
 function appendTerminalOutput(chunk) {
-  const raw = String(chunk || '');
+  let raw = String(chunk || '');
+  if (!raw) return;
+  // Strip cursor position report (CPR) responses: ESC[<row>;<column>R
+  // These leak through PTY and cause ";1R" to appear before commands
+  raw = raw.replace(/\x1b\[[0-9;]*R/g, '');
   if (!raw) return;
   terminalSession.buffer = trimTerminalBuffer(terminalSession.buffer + raw);
   broadcastToClients({
@@ -427,8 +449,11 @@ function ensureTerminalSession() {
 
   setTimeout(() => {
     if (terminalSession.proc) {
-      terminalSession.proc.write(`export PS1='${terminalSession.prompt.replaceAll("'", "'\\''")}'\r`);
-      terminalSession.proc.write(`cd ${PROJECT_ROOT}\r`);
+      // Use XOFF (Ctrl+S) to suppress output echo while sending setup commands,
+      // then XON (Ctrl+Q) to resume. Prevents PS1/cd commands from appearing in terminal.
+      terminalSession.proc.write('\x13'); // Ctrl+S — stop output
+      terminalSession.proc.write(`export PS1='${terminalSession.prompt.replaceAll("'", "'\\''")}' && cd ${PROJECT_ROOT}\r`);
+      terminalSession.proc.write('\x11'); // Ctrl+Q — resume output
     }
   }, 100);
 
@@ -436,7 +461,9 @@ function ensureTerminalSession() {
 }
 
 function sendTerminalInput(command) {
-  const text = String(command || '').replace(/\n+$/g, '');
+  let text = String(command || '').replace(/\n+$/g, '');
+  // Strip CPR responses that may leak through
+  text = text.replace(/\x1b\[[0-9;]*R/g, '').replace(/;[0-9]+R/g, '');
   if (!text.trim()) return { ok: true, queued: false };
   const session = ensureTerminalSession();
   if (!session.proc) throw new Error('terminal not ready');
@@ -886,7 +913,7 @@ async function getInsights(days = 7, source = '') {
   }
   let cmd = `hermes insights --days ${days}`;
   if (source) cmd += ` --source ${source}`;
-  const raw = await shell(cmd, '15s');
+  const raw = await shell(cmd, '60s');
   if (raw) {
     const data = parseHermesInsights(raw);
     getInsights.cache[cacheKey] = { at: now, data };
@@ -1018,14 +1045,23 @@ function buildSpriteState() {
 async function buildDashboardState(authed = false) {
   if (authed) checkSystemHealth();
   const terminal = ensureTerminalSession();
-  const [sessionsData, allSessionsData, cronJobsData, insightsData, knowledgeData, profilesData] = await Promise.all([
+  // Core data — must resolve fast (<5s)
+  const [sessionsData, allSessionsData, cronJobsData, knowledgeData, profilesData] = await Promise.all([
     getSessions(),
     getAllSessions(),
     getCronJobs(),
-    getInsights(),
     buildKnowledgeMarkdown(),
     getProfiles(),
   ]);
+  // Insights — async, may take 30-60s. Return cached or null immediately.
+  let insightsData = null;
+  try {
+    // Race: either cached/fast result within 2s, or give up and use null
+    insightsData = await Promise.race([
+      getInsights(),
+      new Promise(resolve => setTimeout(() => resolve(null), 2000)),
+    ]);
+  } catch {}
   return {
     title: 'Hermes Control Interface',
     now: new Date().toISOString(),
@@ -1047,7 +1083,7 @@ async function buildDashboardState(authed = false) {
     configSummary: extractConfigSummary(),
     knowledge: knowledgeData,
     logs: events.slice(-30),
-    loginIdentity: 'root@hermes',
+    loginIdentity: HCI_IDENTITY,
     workingDir: PROJECT_ROOT,
     avatar: (() => {
       const override = readAvatarOverride();
@@ -1066,7 +1102,7 @@ async function buildDashboardState(authed = false) {
 
 app.get('/api/session', (req, res) => {
   const authed = isAuthed(req);
-  const response = { authenticated: authed, passwordRequired: true, identity: 'root@hermes' };
+  const response = { authenticated: authed, passwordRequired: true, identity: HCI_IDENTITY };
   if (authed) {
     const cookies = parseCookies(req);
     response.csrfToken = deriveCsrfToken(cookies[AUTH_COOKIE]);
@@ -1079,7 +1115,7 @@ app.get('/api/session', (req, res) => {
 // ============================================
 const {
   isFirstRun, findUser, createUser, deleteUser,
-  verifyUserPassword, changePassword, resetUserPassword, listUsers,
+  verifyUserPassword, changePassword, resetUserPassword, sanitizeUsername, listUsers,
   audit, getAuditLog,
   loadNotifications, addNotification, dismissNotification, clearNotifications,
 } = require('./auth');
@@ -1156,6 +1192,9 @@ app.post('/api/auth/setup', loginRateLimiter, (req, res) => {
   if (!username || !password) {
     return res.status(400).json({ ok: false, error: 'Username and password required' });
   }
+  if (!sanitizeUsername(username)) {
+    return res.status(400).json({ ok: false, error: 'Invalid username (2-32 chars, alphanumeric/_.- only)' });
+  }
   if (password.length < 8) {
     return res.status(400).json({ ok: false, error: 'Password must be at least 8 characters' });
   }
@@ -1177,6 +1216,9 @@ app.post('/api/auth/login', loginRateLimiter, (req, res) => {
 
   if (!username || !password) {
     return res.status(400).json({ ok: false, error: 'Username and password required' });
+  }
+  if (!sanitizeUsername(username)) {
+    return res.status(400).json({ ok: false, error: 'Invalid username' });
   }
 
   // If no users exist, redirect to setup
@@ -1234,6 +1276,9 @@ app.post('/api/users', requireRole('admin'), (req, res) => {
   const { username, password, role } = req.body || {};
   if (!username || !password) {
     return res.status(400).json({ ok: false, error: 'Username and password required' });
+  }
+  if (!sanitizeUsername(username)) {
+    return res.status(400).json({ ok: false, error: 'Invalid username (2-32 chars, alphanumeric/_.- only)' });
   }
   if (password.length < 8) {
     return res.status(400).json({ ok: false, error: 'Password must be at least 8 characters' });
@@ -1339,10 +1384,10 @@ app.get('/api/agent/status', requireAuth, async (req, res) => {
     // Parse key fields
     const model = grab('Model');
     const provider = grab('Provider');
-    // Gateway status — check system-level systemd (not user-level)
+    // Gateway status — check systemd (user-level for non-root, system-level for root)
     let gatewayStatus = 'unknown';
     try {
-      const gwCheck = await shell("systemctl is-active hermes-gateway-* 2>/dev/null | head -1", '5s');
+      const gwCheck = await shell(`systemctl ${SYSTEMD_USER_FLAG} is-active hermes-gateway 2>/dev/null || systemctl ${SYSTEMD_USER_FLAG} is-active hermes-gateway-* 2>/dev/null | head -1`, '5s');
       gatewayStatus = gwCheck.trim() === 'active' ? 'running' : 'stopped';
     } catch {
       gatewayStatus = grab('Status');
@@ -1469,18 +1514,29 @@ app.post('/api/profiles/use', requireCsrf, async (req, res) => {
 // ── Gateway Service Management ─────────────────────────────────────────────
 
 function getGatewayServiceName(profile) {
-  return `hermes-gateway-${profile || 'soci'}`;
+  // For non-root user services, the bare 'hermes-gateway' name is common.
+  // For root (system-level), it's typically 'hermes-gateway-${profile}'.
+  // Return both candidates — callers can try both.
+  const suffix = profile || 'soci';
+  return {
+    bare: 'hermes-gateway',
+    profiled: `hermes-gateway-${suffix}`,
+    // Primary: prefer profiled for root, bare for non-root
+    primary: IS_ROOT ? `hermes-gateway-${suffix}` : 'hermes-gateway',
+  };
 }
 
 app.get('/api/gateway/:profile', requireAuth, async (req, res) => {
   const profile = sanitizeProfileName(req.params.profile);
   if (!profile) return res.status(400).json({ error: 'invalid profile name' });
-  const svc = getGatewayServiceName(profile);
+  const svcs = getGatewayServiceName(profile);
   try {
+    // Try primary first, fallback to alternate
+    const svc = svcs.primary;
     const [isActive, isEnabled, status] = await Promise.all([
-      shell(`systemctl is-active ${svc} 2>/dev/null || echo inactive`),
-      shell(`systemctl is-enabled ${svc} 2>/dev/null || echo disabled`),
-      shell(`systemctl status ${svc} 2>/dev/null | head -10`),
+      shell(`systemctl ${SYSTEMD_USER_FLAG} is-active ${svc} 2>/dev/null || systemctl ${SYSTEMD_USER_FLAG} is-active ${svcs.bare === svc ? svcs.profiled : svcs.bare} 2>/dev/null || echo inactive`),
+      shell(`systemctl ${SYSTEMD_USER_FLAG} is-enabled ${svc} 2>/dev/null || echo disabled`),
+      shell(`systemctl ${SYSTEMD_USER_FLAG} status ${svc} 2>/dev/null | head -10`),
     ]);
     res.json({
       ok: true,
@@ -1533,19 +1589,25 @@ app.get('/api/gateway/:profile/connections', requireAuth, async (req, res) => {
 app.post('/api/gateway/:profile/:action', requireCsrf, async (req, res) => {
   const profile = sanitizeProfileName(req.params.profile);
   const action = sanitizeGatewayAction(req.params.action);
-  const svc = profile ? getGatewayServiceName(profile) : null;
 
   if (!profile) return res.status(400).json({ error: 'invalid profile name' });
   if (!action) return res.status(400).json({ error: 'invalid action (allowed: start, stop, restart, enable, disable)' });
 
   try {
-    // Check if service exists first
-    const exists = await shell(`systemctl list-unit-files ${svc}.service 2>&1`);
+    // Check if service exists first — try both names
+    const svcs = getGatewayServiceName(profile);
+    let svc = svcs.primary;
+    let exists = await shell(`systemctl ${SYSTEMD_USER_FLAG} list-unit-files ${svc}.service 2>&1`);
     if (!exists.includes(svc)) {
-      return res.status(400).json({ ok: false, error: `Service ${svc} not installed. Run: bash scripts/setup-gateway-service.sh --profile ${profile} --user root` });
+      // Try fallback
+      svc = svcs.bare === svc ? svcs.profiled : svcs.bare;
+      exists = await shell(`systemctl ${SYSTEMD_USER_FLAG} list-unit-files ${svc}.service 2>&1`);
+      if (!exists.includes(svc)) {
+        return res.status(400).json({ ok: false, error: `Service not found. Tried: ${svcs.primary}, ${svc}` });
+      }
     }
-    const result = await shell(`systemctl ${action} ${svc} 2>&1`);
-    const isActive = (await shell(`systemctl is-active ${svc} 2>/dev/null || echo inactive`)).trim() === 'active';
+    const result = await shell(`systemctl ${SYSTEMD_USER_FLAG} ${action} ${svc} 2>&1`);
+    const isActive = (await shell(`systemctl ${SYSTEMD_USER_FLAG} is-active ${svc} 2>/dev/null || echo inactive`)).trim() === 'active';
     addNotification(isActive ? 'success' : 'info', `Gateway ${profile}: ${action} ${isActive ? '→ running' : '→ stopped'}`);
     res.json({ ok: true, profile, action, active: isActive, output: result.trim() });
   } catch (e) {
@@ -1556,13 +1618,25 @@ app.post('/api/gateway/:profile/:action', requireCsrf, async (req, res) => {
 app.get('/api/gateway/:profile/logs', requireAuth, async (req, res) => {
   const profile = sanitizeProfileName(req.params.profile);
   if (!profile) return res.status(400).json({ error: 'invalid profile name' });
-  const svc = getGatewayServiceName(profile);
+  const svcs = getGatewayServiceName(profile);
+  const svc = svcs.primary;
   const lines = Math.min(parseInt(req.query.lines || '50', 10), 500);
+  const logType = String(req.query.log || 'gateway').toLowerCase();
   try {
-    const logs = await shell(`journalctl -u ${svc} --no-pager -n ${lines} 2>&1`);
-    res.json({ ok: true, profile, service: svc, logs: logs.trim() });
+    let logs = '';
+    if (logType === 'agent') {
+      const logPath = path.join(CONTROL_HOME, 'logs', 'agent.log');
+      logs = await shell(`tail -n ${lines} "${logPath}" 2>/dev/null || echo "No agent log found"`, '10s');
+    } else if (logType === 'error') {
+      const logPath = path.join(CONTROL_HOME, 'logs', 'errors.log');
+      logs = await shell(`tail -n ${lines} "${logPath}" 2>/dev/null || echo "No error log found"`, '10s');
+    } else {
+      // Gateway logs via journalctl
+      logs = await shell(`journalctl ${SYSTEMD_USER_FLAG} -u ${svc} --no-pager -n ${lines} 2>&1`, '10s');
+    }
+    res.json({ ok: true, profile, service: svc, logType, logs: logs.trim() });
   } catch (e) {
-    res.json({ ok: true, profile, service: svc, logs: '' });
+    res.json({ ok: true, profile, service: svc, logType, logs: '' });
   }
 });
 
@@ -1682,7 +1756,7 @@ app.post('/api/terminal/exec', requireCsrf, async (req, res) => {
         special: true,
         command,
         cwd: PROJECT_ROOT,
-        identity: 'root@hermes',
+        identity: HCI_IDENTITY,
         ready: terminalSession.ready,
         buffer: terminalSession.buffer,
         timestamp: new Date().toISOString(),
@@ -1694,7 +1768,7 @@ app.post('/api/terminal/exec', requireCsrf, async (req, res) => {
       ...result,
       command,
       cwd: PROJECT_ROOT,
-      identity: 'root@hermes',
+      identity: HCI_IDENTITY,
       ready: terminalSession.ready,
       buffer: terminalSession.buffer,
       timestamp: new Date().toISOString(),
@@ -1834,7 +1908,7 @@ app.post('/api/agent/state', requireCsrf, (req, res) => {
   return res.json({ ok: true, state: target });
 });
 
-app.post('/api/avatar', requireCsrf, (req, res) => {
+app.post('/api/avatar', requireCsrf, express.json({ limit: '10mb' }), (req, res) => {
   const dataUrl = String(req.body?.dataUrl || '').trim();
   if (!dataUrl) return res.status(400).json({ error: 'no data' });
   // Accept any image/* data URL with base64 encoding
@@ -2035,22 +2109,22 @@ app.get('/api/skills/browse/:page', requireAuth, async (req, res) => {
   }
 });
 
-// Skills search
+// Skills search — use execHermes to prevent shell injection
 app.get('/api/skills/search/:query', requireAuth, async (req, res) => {
   try {
     const query = decodeURIComponent(req.params.query);
-    const output = await shell(`hermes skills search "${query}" 2>&1`, '15s');
+    const output = await execHermes(['skills', 'search', query], 15000);
     res.json({ ok: true, output });
   } catch (e) {
     res.json({ ok: false, error: e.message });
   }
 });
 
-// Skills inspect (preview)
+// Skills inspect (preview) — use execHermes to prevent shell injection
 app.get('/api/skills/inspect/:name', requireAuth, async (req, res) => {
   try {
     const name = decodeURIComponent(req.params.name);
-    const output = await shell(`hermes skills inspect "${name}" 2>&1`, '15s');
+    const output = await execHermes(['skills', 'inspect', name], 15000);
     res.json({ ok: true, output });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -2075,8 +2149,8 @@ app.post('/api/skills/install', requireRole('admin'), async (req, res) => {
   try {
     const { skill, profile } = req.body || {};
     if (!skill) return res.status(400).json({ ok: false, error: 'skill name required' });
-    const flag = profile ? `-p ${sanitizeProfileName(profile)} ` : '';
-    const output = await shell(`hermes ${flag}skills install "${skill}" --yes 2>&1`, '30s');
+    const flag = profile ? `-p ${sanitizeProfileName(profile)}` : '';
+    const output = await execHermes([flag, 'skills', 'install', skill, '--yes'].filter(Boolean), 30000);
     const success = !output.includes('error') && !output.includes('Error');
     res.json({ ok: success, output });
   } catch (e) {
@@ -2089,8 +2163,8 @@ app.post('/api/skills/uninstall', requireRole('admin'), async (req, res) => {
   try {
     const { skill, profile } = req.body || {};
     if (!skill) return res.status(400).json({ ok: false, error: 'skill name required' });
-    const flag = profile ? `-p ${sanitizeProfileName(profile)} ` : '';
-    const output = await shell(`echo y | hermes ${flag}skills uninstall "${skill}" 2>&1`, '15s');
+    const flag = profile ? `-p ${sanitizeProfileName(profile)}` : '';
+    const output = await execHermes([flag, 'skills', 'uninstall', skill, '--yes'].filter(Boolean), 15000);
     res.json({ ok: true, output });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -2154,6 +2228,55 @@ app.post('/api/update', requireRole('admin'), async (req, res) => {
   }
 });
 
+// Backup — create and download zip
+app.post('/api/backup', requireRole('admin'), async (req, res) => {
+  try {
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const outPath = `/tmp/hci-backup-${crypto.randomUUID()}.zip`;
+    const output = await shell(`hermes backup -o ${outPath} 2>&1`, '120s');
+    if (!fs.existsSync(outPath)) {
+      return res.json({ ok: false, error: 'Backup file not created', output });
+    }
+    audit(req.hciUser?.username || 'unknown', req.hciUser?.role || 'unknown', 'BACKUP_CREATE', outPath);
+    res.download(outPath, `hermes-backup-${ts}.zip`, (err) => {
+      fs.unlink(outPath, () => {}); // cleanup after download
+    });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// Import — upload and restore from zip
+app.post('/api/import', requireRole('admin'), (req, res) => {
+  const multer = require('multer');
+  const upload = multer({ dest: '/tmp/', limits: { fileSize: 500 * 1024 * 1024 } }); // 500MB
+  upload.single('backup')(req, res, async (err) => {
+    if (err) return res.json({ ok: false, error: err.message });
+    if (!req.file) return res.json({ ok: false, error: 'No file uploaded' });
+    try {
+      const output = await shell(`hermes import ${req.file.path} --force 2>&1`, '120s');
+      fs.unlink(req.file.path, () => {});
+      audit(req.hciUser?.username || 'unknown', req.hciUser?.role || 'unknown', 'BACKUP_IMPORT', req.file.originalname);
+      res.json({ ok: true, output });
+    } catch (e) {
+      fs.unlink(req.file.path, () => {});
+      res.json({ ok: false, error: e.message });
+    }
+  });
+});
+
+// HCI Restart — delayed restart, response sent first
+app.post('/api/hci-restart', requireRole('admin'), (req, res) => {
+  audit(req.hciUser?.username || 'unknown', req.hciUser?.role || 'unknown', 'HCI_RESTART', 'initiated');
+  res.json({ ok: true, message: 'HCI restarting in 2 seconds...' });
+  // Delayed restart: let response flush, then kill and restart
+  const script = `sleep 2 && fuser -k ${PORT}/tcp 2>/dev/null; sleep 1 && cd ${PROJECT_ROOT} && nohup node server.js &>/dev/null &`;
+  spawn('sh', ['-c', script], {
+    detached: true,
+    stdio: 'ignore',
+  }).unref();
+});
+
 // Session rename
 app.post('/api/sessions/:id/rename', requireCsrf, async (req, res) => {
   try {
@@ -2178,7 +2301,7 @@ app.get('/api/sessions/:id/export', requireAuth, async (req, res) => {
   try {
     const sessionId = sanitizeSessionId(req.params.id);
     if (!sessionId) return res.status(400).json({ ok: false, error: 'invalid session id' });
-    const tmpFile = `/tmp/session-${sessionId}.jsonl`;
+    const tmpFile = `/tmp/session-${crypto.randomUUID()}.jsonl`;
     const output = await shell(`hermes sessions export ${tmpFile} --session-id ${sessionId} 2>&1`);
     const data = await shell(`cat ${tmpFile} 2>/dev/null`);
     await shell(`rm -f ${tmpFile}`);
@@ -2220,7 +2343,7 @@ app.get('/api/usage/:days', requireAuth, async (req, res) => {
     const days = Math.min(parseInt(req.params.days || '7', 10), 90);
     const profile = sanitizeProfileName(req.query.profile) || undefined;
     const cmd = profile ? `hermes --profile ${profile} insights --days ${days}` : `hermes insights --days ${days}`;
-    const raw = await shell(`${cmd} 2>&1`);
+    const raw = await shell(`${cmd} 2>&1`, '60s');
     const parsed = parseInsights(raw);
     res.json({ ok: true, ...parsed, raw });
   } catch (e) {
@@ -2344,7 +2467,7 @@ app.get('/api/insights/:profile/:days', requireAuth, async (req, res) => {
     const profile = sanitizeProfileName(req.params.profile);
     if (!profile) return res.status(400).json({ ok: false, error: 'invalid profile name' });
     const days = Math.min(parseInt(req.params.days || '7', 10), 90);
-    const output = await shell(`hermes --profile ${profile} insights --days ${days} 2>&1`);
+    const output = await shell(`hermes --profile ${profile} insights --days ${days} 2>&1`, '60s');
     res.json({ ok: true, output });
   } catch (e) {
     res.json({ ok: false, error: e.message });
@@ -2439,20 +2562,33 @@ app.post('/api/hermes-cron/:profile/:jobId/:action', requireCsrf, async (req, re
 const server = (() => {
   const sslCert = process.env.HCI_SSL_CERT_FILE;
   const sslKey = process.env.HCI_SSL_KEY_FILE;
-  if (sslCert && sslKey && fs.existsSync(sslCert) && fs.existsSync(sslKey)) {
-    const server = https.createServer({
-      cert: fs.readFileSync(sslCert),
-      key: fs.readFileSync(sslKey),
-    }, app);
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`Hermes Control Interface running on https://0.0.0.0:${PORT}`);
-    });
-    return server;
+  if (sslCert && sslKey) {
+    if (!fs.existsSync(sslCert) || !fs.existsSync(sslKey)) {
+      console.error(`SSL cert/key not found — cert: ${sslCert}, key: ${sslKey}`);
+      console.error('Falling back to HTTP.');
+    } else {
+      try {
+        const server = https.createServer({
+          cert: fs.readFileSync(sslCert),
+          key: fs.readFileSync(sslKey),
+          minVersion: 'TLSv1.2',
+        }, app);
+        server.listen(PORT, '127.0.0.1', () => {
+          console.log(`Hermes Control Interface running on https://127.0.0.1:${PORT}`);
+          console.log('Password gate: env-secret only');
+          console.log(`Identity: ${HCI_IDENTITY}`);
+        });
+        return server;
+      } catch (e) {
+        console.error(`SSL setup failed: ${e.message}`);
+        console.error('Falling back to HTTP.');
+      }
+    }
   }
-  const server = app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Hermes Control Interface running on http://0.0.0.0:${PORT}`);
+  const server = app.listen(PORT, '127.0.0.1', () => {
+    console.log(`Hermes Control Interface running on http://127.0.0.1:${PORT}`);
     console.log('Password gate: env-secret only');
-    console.log(`Identity: root@hermes`);
+    console.log(`Identity: ${HCI_IDENTITY}`);
   });
   return server;
 })();
@@ -2461,10 +2597,15 @@ const wss = new WebSocketServer({
   server,
   path: '/ws',
   verifyClient: (info, done) => {
-    // Allow same-origin and localhost
+    // Strict origin check — exact match with host header
     const origin = info.req.headers.origin || '';
     const host = info.req.headers.host || '';
-    if (!origin || origin.includes(host) || origin.includes('localhost') || origin.includes('127.0.0.1')) {
+    if (!origin) {
+      // Allow requests without Origin header (same-origin fetch, curl, etc.)
+      return done(true);
+    }
+    const expected = [`http://${host}`, `https://${host}`];
+    if (expected.includes(origin)) {
       done(true);
     } else {
       log('websocket.rejected', `origin: ${origin}`);
@@ -2483,9 +2624,14 @@ async function broadcast() {
 
 wss.on('connection', async (socket, req) => {
   socket.authed = isAuthed(req);
-  const state = await buildDashboardState(socket.authed);
+  if (!socket.authed) {
+    // Don't send dashboard data to unauthenticated connections
+    socket.send(JSON.stringify({ type: 'auth-required', message: 'authentication required' }));
+    return;
+  }
+  const state = await buildDashboardState(true);
   socket.send(JSON.stringify({ type: 'snapshot', payload: state }));
-  if (socket.authed && terminalSession.buffer) {
+  if (terminalSession.buffer) {
     socket.send(JSON.stringify({
       type: 'terminal-transcript',
       buffer: terminalSession.buffer,
@@ -2501,8 +2647,12 @@ wss.on('connection', async (socket, req) => {
       const msg = JSON.parse(raw.toString());
       if (msg.type === 'ping') socket.send(JSON.stringify({ type: 'pong', ts: Date.now() }));
       if (msg.type === 'terminal-input' && socket.authed) {
-        const data = String(msg.data || '');
+        let data = String(msg.data || '');
         if (data.length > 4096) return;
+        // Strip CPR responses (cursor position report) that leak through xterm
+        // Pattern: ESC[<n>;<m>R or residual ;1R sequences
+        data = data.replace(/\x1b\[[0-9;]*R/g, '').replace(/;[0-9]+R/g, '');
+        if (!data) return;
         const command = data.replace(/[\r\n]+$/g, '');
         if (/^\/cron\s+/i.test(command)) {
           try {
@@ -2537,6 +2687,9 @@ wss.on('connection', async (socket, req) => {
 // No periodic broadcast — clients get updates via WS events and targeted API calls.
 
 log('system.started', 'Hermes Control Interface booted');
+
+// Warm up insights cache in background — so first WebSocket doesn't timeout
+getInsights().catch(() => {});
 
 // Lightweight system metrics broadcast every 5 seconds (no hermes commands)
 setInterval(() => {

@@ -4,10 +4,20 @@
 const bcrypt = require('bcrypt');
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
-const USERS_FILE = path.join(process.env.HOME || '/root', '.hermes', 'hci-users.json');
-const AUDIT_FILE = path.join(process.env.HOME || '/root', '.hermes', 'hci-audit.log');
+const HERMES_HOME = path.join(os.homedir(), '.hermes');
+const USERS_FILE = path.join(HERMES_HOME, 'hci-users.json');
+const AUDIT_FILE = path.join(HERMES_HOME, 'hci-audit.log');
 const SALT_ROUNDS = 10;
+
+// Username validation — prevent injection and log corruption
+function sanitizeUsername(name) {
+  const s = String(name || '').trim();
+  if (s.length < 2 || s.length > 32) return null;
+  if (!/^[a-zA-Z0-9_.-]+$/.test(s)) return null;
+  return s;
+}
 
 // ============================================
 // User Store
@@ -38,20 +48,22 @@ function findUser(username) {
 }
 
 function createUser(username, password, role = 'viewer') {
+  const clean = sanitizeUsername(username);
+  if (!clean) return { ok: false, error: 'Invalid username (2-32 chars, alphanumeric/_.- only)' };
   const data = loadUsers();
-  if (data.users.find(u => u.username === username)) {
+  if (data.users.find(u => u.username === clean)) {
     return { ok: false, error: 'Username already exists' };
   }
   const hash = bcrypt.hashSync(password, SALT_ROUNDS);
   data.users.push({
-    username,
+    username: clean,
     password_hash: hash,
     role,
     created_at: new Date().toISOString(),
     last_login: null,
   });
   saveUsers(data);
-  audit('system', 'admin', 'USER_CREATE', `created user ${username} (${role})`);
+  audit('system', 'admin', 'USER_CREATE', `created user ${clean} (${role})`);
   return { ok: true };
 }
 
@@ -156,7 +168,7 @@ function getAuditLog(limit = 100) {
 // ============================================
 // Notifications
 // ============================================
-const NOTIF_FILE = path.join(process.env.HOME || '/root', '.hermes', 'hci-notifications.json');
+const NOTIF_FILE = path.join(HERMES_HOME, 'hci-notifications.json');
 
 function loadNotifications() {
   try {
@@ -210,6 +222,7 @@ module.exports = {
   verifyUserPassword,
   changePassword,
   resetUserPassword,
+  sanitizeUsername,
   listUsers,
   audit,
   getAuditLog,
