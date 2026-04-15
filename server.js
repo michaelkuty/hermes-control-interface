@@ -2573,8 +2573,8 @@ const server = (() => {
           key: fs.readFileSync(sslKey),
           minVersion: 'TLSv1.2',
         }, app);
-        server.listen(PORT, '127.0.0.1', () => {
-          console.log(`Hermes Control Interface running on https://127.0.0.1:${PORT}`);
+        server.listen(PORT, bind, () => {
+          console.log(`Hermes Control Interface running on https://${bind}:${PORT}`);
           console.log('Password gate: env-secret only');
           console.log(`Identity: ${HCI_IDENTITY}`);
         });
@@ -2585,8 +2585,9 @@ const server = (() => {
       }
     }
   }
-  const server = app.listen(PORT, '127.0.0.1', () => {
-    console.log(`Hermes Control Interface running on http://127.0.0.1:${PORT}`);
+  const bind = process.env.BIND_ADDRESS || '127.0.0.1';
+  const server = app.listen(PORT, bind, () => {
+    console.log(`Hermes Control Interface running on http://${bind}:${PORT}`);
     console.log('Password gate: env-secret only');
     console.log(`Identity: ${HCI_IDENTITY}`);
   });
